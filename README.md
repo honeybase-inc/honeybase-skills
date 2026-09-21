@@ -11,13 +11,13 @@ Using the open-source [`skills`](https://github.com/vercel-labs/skills) CLI:
 
 ```bash
 # All three skills
-npx skills add kossalw/honeybase-skills
+npx skills add honeybase-inc/honeybase-skills
 
 # Just one
-npx skills add kossalw/honeybase-skills --skill honeybase-graphql-api
+npx skills add honeybase-inc/honeybase-skills --skill honeybase-graphql-api
 
 # Install for every project
-npx skills add kossalw/honeybase-skills --global
+npx skills add honeybase-inc/honeybase-skills --global
 ```
 
 Or copy any `skills/<name>/` folder into your project's `.claude/skills/` by hand.
