@@ -1,7 +1,7 @@
 ---
 name: honeybase-mcp
 description: Drive Honeybase through its remote MCP server — connect an AI client over OAuth, then read and write tasks, processes, runs, teams, schedules, availability, agents, forms and the org database as MCP tools. Honeybase is a workflow-automation platform with no public documentation and AI models are not trained on it, so ALWAYS load this skill before connecting to or calling the Honeybase MCP server. Complements honeybase-graphql-api (raw GraphQL) and honeybase-forms (form authoring).
-version: 2026-09-12
+version: 2026-10-14
 ---
 
 # Honeybase MCP
@@ -46,7 +46,18 @@ The tool registry is large and versioned with the server, so it is the authorita
 The surfaces the tools cover (categories, not an exhaustive list — confirm with `tools/list`):
 
 - **Tasks** — list/get/create/update, the audit trail.
-- **Processes & workflows** — list processes, read a workflow (draft or released), save a draft, release; list and read **runs** (`list_runs` / run results are the debugging surface for a failed production run). A released version is immutable, but saving or releasing one does not fail: it creates a new row (a draft, or the next version) and the result's `forkedFrom` / `publicId` say so.
+- **Processes & workflows** — list processes (standard **and** endpoint rows, each with a `kind`), read a workflow (draft or released; manifest includes `processKind`), save a draft, release; `create_process` accepts optional `kind` (`standard` default, or `endpoint` — not `tool`, use `create_tool`). List and read **runs** (`list_runs` / run results are the debugging surface for a failed production run). A released version is immutable, but saving or releasing one does not fail: it creates a new row (a draft, or the next version) and the result's `forkedFrom` / `publicId` say so.
+
+**Standard vs endpoint (webhooks vs sync API):**
+
+| | Standard process | Endpoint process (`kind=endpoint`) |
+|---|---|---|
+| Trigger | Webhook `POST /api/webhook/...` → **202**, run is async | `POST /api/endpoints/{processPublicId}` → **sync** Response node body/status |
+| Run history | Yes | No |
+| Default run timeout | 30 min (`settings.timeoutMs`) | **25 s**; raise via `update_process_settings` only when sync work needs it (max **4.5 min** / 270000 ms) |
+| Auth | Webhook keys / triggers | **User** session token only today (org API keys refused) |
+
+Keep endpoint timeouts at **25 s** unless the synchronous work genuinely needs longer; long runs compete for per-org in-flight endpoint capacity on each pod (see server instructions / tool schema). Production rollouts can cut in-flight endpoint calls around **~30 s** until web deployments get a higher `terminationGracePeriodSeconds` — that is a deploy concern, not something MCP changes.
 - **Teams, schedules, availability** — membership, job schedules, availability state and reassignment.
 - **Agents & tools** — AI agents, their runs, their tool definitions.
 - **Forms** — list/create/update reusable form definitions.
