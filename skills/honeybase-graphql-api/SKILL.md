@@ -18,7 +18,8 @@ Body: {"query": "...", "variables": {...}}
 ```
 
 - `BASE_URL` is the org's server (e.g. `https://app.honeybase.ai`, or `http://localhost:8080` in dev). Ask the user if unknown.
-- The key is an **organization API key** created in *Organization Settings → Developer → API Keys*. It is org-scoped and carries an explicit permission set chosen at creation. It is NOT a JWT and never expires mid-session — no refresh dance, just send it on every request.
+- The key is an **organization API key** created in *Organization Settings → Developer → API Keys* (or a **personal key** from *Profile → My API Keys*, which acts as its owner within their current role). It is org-scoped and carries an explicit permission set chosen at creation. It is NOT a JWT and never expires mid-session — no refresh dance, just send it on every request.
+- **Keys have scopes.** The GraphQL API needs the `graphql` scope (every key created before scopes existed has it; a key created endpoint-only does not and gets 401 here). `endpoint:invoke` scopes let the same key `POST /api/endpoints/<processPublicId>` for exactly the listed endpoints — 403 `{"code":"key_not_scoped"}` for any other endpoint in the organization, 404 for anything else, 401 `{"code":"key_invalid"}` for a dead key, 401 `{"code":"key_revoked"}` if the key is revoked while a call is running, 429 (`Retry-After`) when the key's own per-minute budget or in-flight cap is used up. Scopes are set with `scopes` on `createApiKey`/`createPersonalApiKey` and `updateApiKeyScopes`; `OrgApiKey.graphqlAccess`, `endpointScopes`, `readsRunResults`, `rateLimitPerMinute`, `maxConcurrency` report them.
 - A wrong/expired/revoked key → HTTP **401** (uniform; the server won't tell you which). A missing permission → HTTP 200 with an error entry (below). Keys can NEVER manage API keys, rename the org, or do anything the schema marks "Requires Owner or Admin role".
 
 ## Token discipline (read this before querying)
