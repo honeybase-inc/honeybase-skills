@@ -1082,6 +1082,168 @@ type CreatedApiKey {
   plaintextKey: String!
 }
 
+type DashboardChartDeleteResult {
+  deleted: Boolean!
+  "When not deleted: the dashboards whose tiles use the chart. Remove those tiles first."
+  usedBy: [DashboardRef!]!
+}
+
+type DashboardChartDetail {
+  publicId: String!
+  name: String!
+  description: String!
+  "JSON of where the SQL runs: {\"kind\":\"honeybase\"} | {\"kind\":\"orgdb\"} | {\"kind\":\"integration\",\"integrationId\":N}."
+  source: String!
+  "JSON of the query: {\"kind\":\"sql\", \"sql\": \"... {{param}} ... [[AND ... {{param}}]]\", \"parameters\": [{name, type, required, default?}]}."
+  query: String!
+  "JSON of the chart config (chart-viz.schema.json): {type, x?, y?, series?, xType?, timeGrain?, stacked?, horizontal?, sort?, limit?, yFormat?, title?, drill?}."
+  viz: String!
+  version: Int!
+  folderId: Long
+  tagIds: [Long!]!
+  "JSON snapshot behind the library's mini chart, {columns, rows (at most 50), truncated, filterValues}; written by the server on runs with the chart's default parameters only. Null when the chart never ran on its defaults."
+  preview: String
+  previewAt: String
+  createdBy: Long
+  updatedBy: Long
+  createdAt: String!
+  updatedAt: String!
+}
+
+type DashboardChartUpdateResult {
+  "saved | invalid (see errors; nothing written) | conflict (expectedVersion is stale; reload at currentVersion)"
+  outcome: String!
+  chart: DashboardChartDetail
+  errors: [String!]!
+  currentVersion: Int
+}
+
+type DashboardDetail {
+  publicId: String!
+  name: String!
+  description: String!
+  "JSON array of the dashboard's filters: [{id, label, type (text|number|date|date_range|multi_select), default?, values?}]."
+  filters: String!
+  "Bumped on every update; updateDashboard takes it as expectedVersion and returns a conflict when it is stale."
+  version: Int!
+  folderId: Long
+  tagIds: [Long!]!
+  tiles: [DashboardTileDetail!]!
+  createdBy: Long
+  updatedBy: Long
+  createdAt: String!
+  updatedAt: String!
+}
+
+type DashboardMutations {
+  "Create an empty dashboard. Requires canManageDashboards."
+  createDashboard("Title, required" name: String!, "Description, required: it is what the list shows and what Barry reads first" description: String!, folderId: Long): DashboardDetail
+  "Edit a dashboard with ops, applied in one transaction and validated as a whole. Requires canManageDashboards."
+  updateDashboard(publicId: String!, "JSON array of ops applied in order, each {\"op\": ...}: add_tile {chartPublicId, x, y, w, h, tileId?, titleOverride?}, remove_tile {tileId}, move_tile {tileId, x, y, w, h}, set_filter {filter}, remove_filter {filterId}, link_filter {tileId, filterId, param}, unlink_filter {tileId, filterId}, rename {name}, set_description {description}." ops: String!, "The version last read; a stale one returns outcome conflict" expectedVersion: Int!, "Validate the result and write nothing" validateOnly: Boolean): DashboardUpdateResult
+  "Delete a dashboard and its tiles; its charts stay in the library. Requires canManageDashboards."
+  deleteDashboard(publicId: String!): Boolean
+  "Save the query a runDashboardAdhoc handle proved as a chart in the library. Requires canManageDashboards."
+  saveDashboardChart("From runDashboardAdhoc: the chart's source, SQL and parameters are taken from it" queryHandle: String!, name: String!, description: String, "Chart config JSON (chart-viz.schema.json), validated against the handle's columns" viz: String!, folderId: Long): DashboardChartDetail
+  "Update a chart's name, description, config or (through a fresh queryHandle) query. Refused while a dashboard links a filter to a parameter the new query drops. Requires canManageDashboards."
+  updateDashboardChart(publicId: String!, "The version last read; a stale one returns outcome conflict" expectedVersion: Int!, name: String, description: String, "A new query: run it with runDashboardAdhoc and pass the handle. The only way to change the SQL, parameters or source." queryHandle: String, "A new chart config JSON" viz: String): DashboardChartUpdateResult
+  "Delete a chart; refused (deleted=false, usedBy) while any dashboard tile uses it. Requires canManageDashboards."
+  deleteDashboardChart(publicId: String!): DashboardChartDeleteResult
+  "File a dashboard in a dashboard folder (null: unfiled). Requires canManageDashboards."
+  setDashboardFolder(publicId: String!, "A dashboard folder; null moves it out of any folder" folderId: Long): Boolean
+  "File a chart in a chart folder (null: unfiled). Requires canManageDashboards."
+  setDashboardChartFolder(publicId: String!, "A chart folder; null moves it out of any folder" folderId: Long): Boolean
+  "Tag a dashboard (a dashboard-scope tag). Requires canManageDashboards."
+  assignDashboardTag(publicId: String!, tagId: Long!): Boolean
+  "Untag a dashboard. Requires canManageDashboards."
+  unassignDashboardTag(publicId: String!, tagId: Long!): Boolean
+  "Tag a chart (a chart-scope tag). Requires canManageDashboards."
+  assignDashboardChartTag(publicId: String!, tagId: Long!): Boolean
+  "Untag a chart. Requires canManageDashboards."
+  unassignDashboardChartTag(publicId: String!, tagId: Long!): Boolean
+}
+
+type DashboardQueries {
+  "The organization's dashboards, by name, with their tiles and filters. Any member."
+  dashboards("Only dashboards in this folder" folderId: Long, "Only dashboards carrying every one of these tags" tagIds: [Long!]): [DashboardDetail!]
+  "One dashboard by public id. Any member."
+  dashboard(publicId: String!): DashboardDetail
+  "The charts library, by name, each with its preview snapshot. Any member."
+  dashboardCharts("Only charts in this folder" folderId: Long, "Only charts carrying every one of these tags" tagIds: [Long!], "Only charts on this source (source JSON, as dashboardSources returns it)" source: String): [DashboardChartDetail!]
+  "One chart by public id, including its SQL. Any member."
+  dashboardChart(publicId: String!): DashboardChartDetail
+  "Where charts can run: Honeybase's own data, the organization database when provisioned, and every enabled SQL integration. Any member."
+  dashboardSources: [DashboardSourceInfo!]
+  "Tables, views and columns of a source as dashboards see it (for Honeybase: the reporting views only). Requires canManageDashboards."
+  dashboardSourceSchema("Source JSON, as dashboardSources returns it" source: String!): OrgDbSchema
+  "Distinct values of one column, for filter value pickers; runs through the same gate and caps as any dashboard query. Returns a JSON array. Requires canManageDashboards."
+  dashboardColumnValues("Source JSON, as dashboardSources returns it" source: String!, "Table or view as dashboardSourceSchema lists it (schema.table when it is not in the default schema)" table: String!, column: String!, "Values starting with this text (case-insensitive on Postgres); empty = any" prefix: String, "At most this many values, 1-50 (default 50)" limit: Int): String
+  "Run a tile's chart with dashboard filter values mapped onto its parameters. Gate and database errors come back verbatim as the error message. Any member."
+  runDashboardChart(dashboardPublicId: String!, "The tile's tileId" tileId: String!, "JSON object of dashboard filter values by filter id, e.g. {\"period\": {\"from\": \"2026-01-01\", \"to\": \"2026-02-01\"}}. A filter without a value falls back to its default; values only reach the chart through the tile's mappings." filterValues: String): DashboardQueryRun
+  "Run a chart on its default parameters (library card, chart editor). Any member."
+  runDashboardChartStandalone(chartPublicId: String!): DashboardQueryRun
+  "Run ad-hoc SQL against a source (the chart editor). Returns the rows and a queryHandle that saveDashboardChart takes. Gate and database errors come back verbatim. Requires canManageDashboards."
+  runDashboardAdhoc("Source JSON, as dashboardSources returns it" source: String!, "One SELECT. {{name}} binds a declared parameter; [[ ... {{name}} ... ]] is dropped when its parameters have no value (WHERE TRUE [[AND col = {{name}}]])." sql: String!, "JSON array of parameter declarations: [{name, type (text|number|date|date_range|multi_select), required?, default?}]" parameters: String, "JSON object of test values by parameter name" values: String): DashboardQueryRun
+}
+
+type DashboardQueryColumn {
+  name: String!
+  "text | number | boolean | date | datetime | json"
+  kind: String!
+}
+
+type DashboardQueryRun {
+  columns: [DashboardQueryColumn!]!
+  "JSON array of rows, each an array of values in column order. Customer data: render as text."
+  rows: String!
+  "True when the row cap cut the result short"
+  truncated: Boolean!
+  elapsedMs: Long!
+  "runDashboardAdhoc only: the proof this query ran (valid 24 h). saveDashboardChart / updateDashboardChart take it, and save the handle's SQL, parameters and source — never SQL from the client."
+  queryHandle: String
+}
+
+type DashboardRef {
+  publicId: String!
+  name: String!
+}
+
+type DashboardSourceInfo {
+  "JSON of the source, to pass back as a source argument: {\"kind\":\"honeybase\"} | {\"kind\":\"orgdb\"} | {\"kind\":\"integration\",\"integrationId\":N}."
+  source: String!
+  name: String!
+  "Postgres | MySql | Oracle"
+  dialect: String!
+}
+
+type DashboardTileDetail {
+  "Stable id of the tile on its dashboard: ops (move_tile, link_filter, ...) and runDashboardChart address the tile by it."
+  tileId: String!
+  chartPublicId: String!
+  "Column on the 24-column grid (0-23)"
+  x: Int!
+  "Row on the grid"
+  y: Int!
+  "Width in grid columns"
+  w: Int!
+  "Height in grid rows"
+  h: Int!
+  "Which dashboard filter feeds which chart parameter on this tile; the only path from a filter value to the chart's SQL."
+  mappings: [TileMapping!]!
+  titleOverride: String
+  position: Int!
+}
+
+type DashboardUpdateResult {
+  "saved | validated (validateOnly: valid, nothing written) | invalid (see errors; nothing written) | conflict (expectedVersion is stale; reload at currentVersion)"
+  outcome: String!
+  "saved: the dashboard as stored; validated: as the ops would leave it"
+  dashboard: DashboardDetail
+  "invalid: every problem found, one sentence each"
+  errors: [String!]!
+  "conflict: the version now stored"
+  currentVersion: Int
+}
+
 type EmbeddedPage {
   name: String!
   url: String!
@@ -1397,8 +1559,10 @@ type McpConnectionMutations {
 type McpConnectionQueries {
   "One MCP connection: its advertised tools with approval state, pins and last-sync status"
   mcpConnection(integrationId: Long!): McpConnectionDetail
-  "All MCP connections of the org with their tool ledgers (names, tiers, statuses — no schemas or pins), for the agent builder's attach surface and the Barry composer's MCP tools section (requires an agent permission or canManageIntegrations)"
+  "All MCP connections of the org with their tool ledgers (names, tiers, statuses — no schemas or pins), for the agent builder's attach surface and the Barry composer's MCP tools section (requires an agent permission, canBuildWorkflows or canManageIntegrations)"
   listMcpConnections: [McpConnectionSummary!]
+  "Approved pinned MCP tool contracts for agent, workflow or integration authors; no URL, approval hash or approver identity"
+  listMcpConnectionTools(integrationId: Long!): [McpToolContract!]
 }
 
 type McpConnectionSummary {
@@ -1446,11 +1610,23 @@ type McpTierSuggestion {
   generatedAt: String!
 }
 
+type McpToolContract {
+  toolName: String!
+  description: String!
+  inputSchema: String!
+  access: String
+  status: String!
+  outputSchema: String
+  inputSchemaHash: String!
+  title: String
+}
+
 type McpToolListing {
   toolName: String!
   description: String!
   access: String
   status: String!
+  title: String
 }
 
 type McpToolRef {
@@ -1493,6 +1669,8 @@ type Mutations {
   apiKeys: ApiKeyMutations!
   "Organization database (Neon) mutations"
   orgDatabase: OrgDatabaseMutations!
+  "Custom dashboards and the charts library (canManageDashboards)"
+  dashboards: DashboardMutations!
   "Job schedule mutations"
   schedules: ScheduleMutations!
   "Availability (control panel) mutations"
@@ -1951,6 +2129,8 @@ type Queries {
   apiKeys: ApiKeyQueries!
   "Organization database (Neon) queries"
   orgDatabase: OrgDatabaseQueries!
+  "Custom dashboards and the charts library: list, read and run (any member); schema browsing (canManageDashboards)"
+  dashboards: DashboardQueries!
   "Honeybase AI credits queries"
   aiCredits: AiCreditsQueries!
   "Job schedule queries"
@@ -2413,6 +2593,11 @@ type TestSessionData {
   session: AgentSession!
   messages: [AgentSessionMessage!]!
   activeRun: AgentRun
+}
+
+type TileMapping {
+  filterId: String!
+  param: String!
 }
 
 type TimezoneConfig {

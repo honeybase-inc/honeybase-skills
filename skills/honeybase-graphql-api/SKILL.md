@@ -43,6 +43,7 @@ Everything is namespaced one level under the roots. Top-level `Queries` / `Mutat
 | `schedules`, `availability` | job schedules, availability state/history, reassignment |
 | `agents`, `tools`, `aiChat` | AI agents, their runs and tools |
 | `integrations`, `secrets`, `orgDatabase`, `forms`, `taskViews`, `notifications`, `organize` | as named |
+| `dashboards` | SQL charts and dashboards: run ad-hoc SQL (`runDashboardAdhoc`, returns a `queryHandle`), save it as a chart, edit a dashboard with a JSON list of ops (`updateDashboard`, guarded by `expectedVersion`), run a tile with filter values. CSV/JSON export is `GET /api/dashboards/charts/<publicId>/export?format=csv` with the same key |
 | `apiKeys`, `organizations`, `oauth`, `auth` | admin/session surfaces — **not usable with an API key** |
 
 **Public (no-login) endpoints.** `processes.setEndpointPublicAccess(processPublicId, enabled, rotate, allowedOrigins, allowAnyOrigin)` makes an endpoint process callable by anyone holding its token at `POST /api/public/endpoints/<token>` (the returned `path`, on the API host); `rotate: true` replaces the token, `enabled: false` revokes it, and `processes.endpointPublicAccess(processPublicId)` reads it (null = not public). Browser pages may call it only from `allowedOrigins` (`[]`, the default, = no website) or, with `allowAnyOrigin: true` (not combinable with a list), from any website; callers without an `Origin` header always pass. Writes need the *Manage releases* and *Build workflows* permissions.
