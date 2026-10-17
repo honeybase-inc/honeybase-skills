@@ -1,7 +1,7 @@
 ---
 name: honeybase-graphql-api
 description: Use the Honeybase GraphQL API with an organization API key (hbk_...) — tasks, processes/workflows, runs, teams, schedules, availability, agents. Honeybase is a workflow-automation platform with no public documentation; AI models are not trained on it, so ALWAYS load this skill before writing any query, mutation or integration against a Honeybase server. Includes the full GraphQL schema as a greppable reference.
-version: 2026-09-13
+version: 2026-10-16
 ---
 
 # Honeybase GraphQL API
@@ -44,6 +44,8 @@ Everything is namespaced one level under the roots. Top-level `Queries` / `Mutat
 | `agents`, `tools`, `aiChat` | AI agents, their runs and tools |
 | `integrations`, `secrets`, `orgDatabase`, `forms`, `taskViews`, `notifications`, `organize` | as named |
 | `apiKeys`, `organizations`, `oauth`, `auth` | admin/session surfaces — **not usable with an API key** |
+
+**Public (no-login) endpoints.** `processes.setEndpointPublicAccess(processPublicId, enabled, rotate, allowedOrigins, allowAnyOrigin)` makes an endpoint process callable by anyone holding its token at `POST /api/public/endpoints/<token>` (the returned `path`, on the API host); `rotate: true` replaces the token, `enabled: false` revokes it, and `processes.endpointPublicAccess(processPublicId)` reads it (null = not public). Browser pages may call it only from `allowedOrigins` (`[]`, the default, = no website) or, with `allowAnyOrigin: true` (not combinable with a list), from any website; callers without an `Origin` header always pass. Writes need the *Manage releases* and *Build workflows* permissions.
 
 Conventions:
 - **Ids are `Long`**; most top entities also have an opaque `publicId` (UUID string). By-id getters dual-accept: pass exactly ONE of `taskId:` / `publicId:`.

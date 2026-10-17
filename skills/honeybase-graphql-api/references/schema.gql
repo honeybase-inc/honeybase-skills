@@ -24,12 +24,20 @@ enum ChatSubjectKind {
   Agent
   App
   Home
+  TaskFeedback
   Workflow
 }
 
 enum NotificationKind {
   AgentBudgetExhausted
   AgentBudgetThreshold
+  AgentTaskCompleted
+  AgentTaskFailed
+  AgentTaskHandedBack
+  AgentTaskNeedsYou
+  AgentTaskReport
+  AiCreditsExhausted
+  AiCreditsThreshold
   AvailabilityChangeProposed
   AvailabilityChanged
   Error
@@ -45,6 +53,14 @@ enum NotificationKind {
 enum RunDirection {
   Backward
   Forward
+}
+
+input ApiKeyScopesInput {
+  graphql: Boolean
+  endpoints: [String!]
+  readResults: Boolean
+  rateLimitPerMinute: Int
+  maxConcurrency: Int
 }
 
 input EmbeddedPageInput {
@@ -159,6 +175,9 @@ input PermissionsInput {
   canManageTasks: Boolean
   canViewRunHistory: Boolean
   canOverrideTaskCompletion: Boolean
+  canManageApiKeys: Boolean
+  canCreateApiKeys: Boolean
+  canManageDashboards: Boolean
 }
 
 input ProcessSettingsInput {
@@ -182,8 +201,22 @@ input RunNodeGqlInput {
   usage: String
 }
 
+input TaskAssignmentInput {
+  userId: Long
+  teamId: Long
+  method: String
+}
+
+input TaskFileInput {
+  id: String!
+  name: String!
+  contentType: String!
+  sizeBytes: Long!
+  source: String!
+}
+
 input TaskFormInput {
-  formId: Long!
+  formId: Long
   name: String!
   schemaSnapshot: String!
   version: Int!
@@ -191,6 +224,7 @@ input TaskFormInput {
   autoComplete: Boolean!
   submission: FormSubmissionInput
   prefillData: String
+  presentation: String
 }
 
 input TaskViewColumnInput {
@@ -208,6 +242,9 @@ input TaskViewFiltersInput {
   searchQuery: String
   dueFromTime: String
   dueToTime: String
+  statuses: [String!]
+  agentFilter: String
+  modes: [String!]
 }
 
 input TaskViewInput {
@@ -263,12 +300,51 @@ input WorkflowTaskInput {
   completedAt: ZonedDateTime
   createdAt: ZonedDateTime
   completionLocked: Boolean
+  files: [TaskFileInput!]
+  agentId: Long
+  agentMode: String
+  agentState: String
+  agentSessionId: Long
+  agentKickoffAt: ZonedDateTime
 }
 
 type AccessToken {
   token: String!
   expiresIn: Long!
   tokenType: String!
+}
+
+type ActivityActor {
+  label: String!
+  via: String!
+  links: [ActivityLink!]!
+  kind: String
+  name: String
+  deleted: Boolean
+  viaName: String
+}
+
+type ActivityChange {
+  path: String!
+  before: String
+  after: String
+  beforePresent: Boolean!
+  afterPresent: Boolean!
+  withheld: Boolean!
+  truncated: Boolean!
+}
+
+type ActivityEntity {
+  kind: String!
+  id: Long!
+  publicId: String
+  label: String
+  deleted: Boolean!
+}
+
+type ActivityLink {
+  kind: String!
+  href: String!
 }
 
 type Agent {
@@ -294,6 +370,23 @@ type AgentData {
   releasedVersion: AgentVersion
 }
 
+type AgentMemory {
+  agentMemoryId: Long!
+  agentId: Long!
+  organizationId: Long!
+  scope: String!
+  processId: Long
+  processName: String
+  text: String!
+  sourceTaskId: Long
+  sourceTaskName: String
+  approvedByWebUserId: Long!
+  approvedByName: String
+  active: Boolean!
+  createdAt: String!
+  updatedAt: String!
+}
+
 type AgentMutations {
   "Create an agent with an empty draft version"
   createAgent(name: String!, description: String!): AgentData
@@ -309,6 +402,12 @@ type AgentMutations {
   setAgentAppInvocable(agentId: Long!, appInvocable: Boolean!): Agent
   "Delete an agent, its versions, sessions and run history"
   deleteAgent(agentId: Long!): Boolean
+  "Teach the agent something by hand (an agent- or process-scoped memory with no source task). Requires canManageAgents; refused for an API key - memory is written only under a person's session."
+  createAgentMemory(agentId: Long!, "Agent (every task run) or Process (one process's tasks)" scope: String!, "Required when scope is Process; ignored otherwise" processId: Long, text: String!): AgentMemory
+  "Edit a memory's text, scope or active flag. Requires canManageAgents."
+  updateAgentMemory(agentMemoryId: Long!, scope: String!, processId: Long, text: String!, "An inactive memory is kept but no longer injected" active: Boolean!): AgentMemory
+  "Forget a memory. Requires canManageAgents."
+  deleteAgentMemory(agentMemoryId: Long!): Boolean
   "Set the org-wide monthly agent budget in USD across all agents (null = unlimited)"
   setOrgAgentBudget("Org-wide monthly agent budget in USD (estimated spend); null = unlimited" monthlyBudgetUsd: Float): Boolean
   "Send a test-chat message: runs the DRAFT version (streams via watchAgentRun)"
@@ -346,6 +445,24 @@ type AgentQueries {
   listBuiltinTools: [BuiltinToolGql!]
   "The native agent tools one integration brings with it, with their derived tool names"
   listNativeTools(integrationId: Long!): [NativeToolGql!]
+  "What people taught this agent, newest first, with provenance (the task it was learned on and who approved it). Requires canRunAgents or canManageAgents."
+  agentMemories(agentId: Long!): [AgentMemory!]
+}
+
+type AgentRequestAnswer {
+  approved: Boolean
+  text: String
+  editedArguments: String
+  formData: String
+}
+
+type AgentRequestPayload {
+  toolName: String
+  toolArguments: String
+  reason: String
+  questions: [String!]!
+  context: String
+  form: TaskForm
 }
 
 type AgentRun {
@@ -410,9 +527,12 @@ type AgentRunStep {
 }
 
 type AgentRunTriggerRef {
-  processId: Long!
+  processId: Long
   runWorkflowId: Long
   nodeName: String
+  taskId: Long
+  agentSessionId: Long
+  wakeup: Int
 }
 
 type AgentSession {
@@ -424,8 +544,35 @@ type AgentSession {
   webUserId: Long
   status: String!
   lastEventSeq: Long!
+  taskState: String
+  budget: AgentTaskBudget!
+  wakeups: Int!
+  tokensUsed: Long!
+  escalations: Int!
+  wakeAt: String
+  wakeReason: String
+  handedBackReason: String
+  taskMode: String
+  approvedPlan: String
+  rating: String
+  ratingComment: String
+  ratedByWebUserId: Long
+  ratedAt: String
+  testCaseCandidate: String
   createdAt: String!
   updatedAt: String!
+}
+
+type AgentSessionEvent {
+  agentSessionEventId: Long!
+  agentSessionId: Long!
+  organizationId: Long!
+  seq: Long!
+  kind: String!
+  summary: String
+  agentRunId: Long
+  payload: String
+  createdAt: String!
 }
 
 type AgentSessionMessage {
@@ -436,17 +583,68 @@ type AgentSessionMessage {
   content: String!
 }
 
+type AgentSessionRequest {
+  agentSessionRequestId: Long!
+  agentSessionId: Long!
+  organizationId: Long!
+  taskId: Long!
+  kind: String!
+  status: String!
+  targetWebUserId: Long
+  targetTeamId: Long
+  agentRunId: Long
+  toolCallId: String
+  payload: AgentRequestPayload!
+  answer: AgentRequestAnswer
+  answeredByWebUserId: Long
+  createdAt: String!
+  answeredAt: String
+}
+
 type AgentSettings {
   toolRefs: [AgentToolRef!]!
   maxTurns: Int!
   maxRunUsd: Float
   temperature: Float
   structuredOutputSchema: String
+  taskModeCeiling: String!
+  taskDefaults: AgentTaskBudget!
+  fallbackAssignee: Long
 }
 
 type AgentSubscriptions {
   "Subscribe to an agent run's live events (text deltas, tool calls, approvals)"
   watchAgentRun(agentRunId: Long!, "Replay persisted events with seq > fromSeq before going live (reload-resilience)" fromSeq: Long): [AgentRunEventGql!]
+}
+
+type AgentTaskBudget {
+  deadlineAt: String
+  maxWakeups: Int
+  maxTokens: Long
+  maxEscalations: Int
+}
+
+type AgentTaskReport {
+  summary: String!
+  actions: [AgentTaskReportAction!]!
+  questions: [String!]!
+}
+
+type AgentTaskReportAction {
+  tool: String!
+  arguments: String
+  why: String
+}
+
+type AgentTaskSessionView {
+  session: AgentSession!
+  agentName: String!
+  events: [AgentSessionEvent!]!
+  runs: [AgentRun!]!
+  report: AgentTaskReport
+  requests: [AgentSessionRequest!]!
+  ratedByName: String
+  canRate: Boolean!
 }
 
 type AgentToolRef {
@@ -510,21 +708,25 @@ type AgentVersion {
 
 type AiChatMutations {
   "Create an AI copilot chat on a process"
-  createChat(processId: Long, "Chat subject kind: workflow | agent | home" subjectKind: String, subjectId: Long, name: String!, "ChatSettings json (mode, maxToolCalls, integrationId, model)" settings: String, "Which surface opened this chat: direct | fix_with_barry | home. Metrics only - gates nothing." origin: String): WorkflowChat
+  createChat(processId: Long, "Chat subject kind: workflow | agent | home" subjectKind: String, subjectId: Long, name: String!, "ChatSettings json (mode, maxToolCalls, integrationId, model, disabledIntegrationIds, disabledToolIds, disabledMcpToolIds)" settings: String, "Which surface opened this chat: direct | fix_with_barry | home. Metrics only - gates nothing." origin: String): WorkflowChat
   "Send a user message and start the copilot's turn (streams via watchChat)"
-  sendChatMessage(chatId: Long!, content: String!, "Workflow chats: the current canvas graph — becomes the chat's working graph" workflowData: WorkflowDataGqlInput, "Agent chats: the builder form's AgentDraftSnapshot JSON — becomes the chat's working draft" agentDraft: String, "App chats: the editor's AppDraftSnapshot JSON — a MANIFEST of the draft (identity, content digest, paths and sizes), never file contents. App files live in app_file and Barry writes them through AppService directly, so there is no working copy to carry" appSnapshot: String, "Home chats: the HomeSnapshot JSON (the organization the chat is scoped to)" homeContext: String, integrationId: Long!, model: String!, "Public ids of already-uploaded workflow files to attach to this message (pasted images). Ids only: the server rebuilds each reference from its own row, so a name, type or size claimed by the client is never believed. Capped per message and by total bytes; every attachment is replayed on each subsequent turn of the chat." files: [String!]!): Boolean
+  sendChatMessage(chatId: Long!, content: String!, "Workflow chats: the current canvas graph — becomes the chat's working graph" workflowData: WorkflowDataGqlInput, "Agent chats: the builder form's AgentDraftSnapshot JSON — becomes the chat's working draft" agentDraft: String, "App chats: the editor's AppDraftSnapshot JSON — a MANIFEST of the draft (identity, content digest, paths and sizes), never file contents. App files live in app_file and Barry writes them through AppService directly, so there is no working copy to carry" appSnapshot: String, "Home chats: the HomeSnapshot JSON (the organization the chat is scoped to)" homeContext: String, "Task-feedback chats: the TaskFeedbackSnapshot JSON (the agent session the interview is about)" taskFeedbackContext: String, "The AI connection this turn runs on. Omit (with model) to keep the chat's current one, or -- on a chat that has none -- to run on the organization's default AI connection: the Honeybase AI credits connection, else its only enabled AI connection. That is how a member who cannot list connections still sends." integrationId: Long, "The model for this turn. Omit to keep the chat's current one, or to use the connection's default model." model: String, "Public ids of already-uploaded workflow files to attach to this message (pasted images). Ids only: the server rebuilds each reference from its own row, so a name, type or size claimed by the client is never believed. Capped per message and by total bytes; every attachment is replayed on each subsequent turn of the chat." files: [String!]!): Boolean
   "Stop the in-flight copilot turn"
   cancelChatTurn(chatId: Long!): Boolean
-  "Approve or reject a pending tool call (AskPermission mode)"
-  respondToToolCall(chatId: Long!, toolCallId: String!, approved: Boolean!, "Rejections only: an optional free-text reply the copilot sees verbatim (it may carry the content you actually want, e.g. a corrected form schema). Capped server-side." note: String, "Input-request cards only: an InputClaim JSON saying what the user created (e.g. {\"Integration\":{\"integrationId\":42}}). It is a POINTER, never a fact and never tool arguments — the server re-reads what it points at under your own permissions and builds the copilot's result from what it finds, so a forged or cross-organization id yields an 'unavailable' result rather than anything the model believes." inputClaim: String): Boolean
-  "Revert an approved copilot write while it is still safe to: the newest revertible write of an idle chat, untouched since, with at most one message after it. Returns whether the revert happened; either way the chat gains a ToolCallUndone event saying what did or did not change. This is never a tool the copilot can call."
-  undoToolCall(chatId: Long!, "The tool call to revert, named by the id on its ToolCallResult event. It is a POINTER and nothing more: the operation is rebuilt from the inverse the server persisted when the write happened, never from anything the client sends, and it runs through the same services under the same identity the write used. Only the newest still-revertible write of the chat qualifies, and only while it is untouched and the chat is idle." toolCallId: String!): Boolean
-  "Update a chat's settings (mode, tool-call limit, model)"
+  "Approve or reject a pending tool call; with alwaysAllow, also grant it a standing approval"
+  respondToToolCall(chatId: Long!, toolCallId: String!, approved: Boolean!, "Rejections only: an optional free-text reply the copilot sees verbatim (it may carry the content you actually want, e.g. a corrected form schema). Capped server-side." note: String, "Approvals only: also record a standing approval (\"Approve always\") for this tool, so matching future calls in any of your chats proceed without a card. Personal, revocable (revokeApprovalGrant), never widens permissions - the call still runs under your own rights. On a release (release_workflow, release_agent, release_app) the standing approval covers only that one process, agent or app. Ignored on rejections; refused on cards that ask you for something (input requests and the approvals card itself, manage_approval_grants) and on a release whose target cannot be resolved." alwaysAllow: Boolean, "Input-request cards only: an InputClaim JSON saying what the user created (e.g. {\"Integration\":{\"integrationId\":42}}). It is a POINTER, never a fact and never tool arguments — the server re-reads what it points at under your own permissions and builds the copilot's result from what it finds, so a forged or cross-organization id yields an 'unavailable' result rather than anything the model believes." inputClaim: String): Boolean
+  "Removed: the one-click undo of a copilot write no longer exists. Always fails; ask the copilot to put the change back instead (its receipt in the chat says what it was before)."
+  undoToolCall(chatId: Long!, "Ignored: the mutation always refuses (undo was removed)." toolCallId: String!): Boolean @deprecated(reason: "Undo was removed (Barry Harness Phase 0). Ask the copilot to put a change back.")
+  "Update a chat's settings (mode, tool-call limit, model, connections Barry may not read in this chat)"
   updateChatSettings(chatId: Long!, settings: String!): WorkflowChat
   "Rename a chat"
   renameChat(chatId: Long!, name: String!): WorkflowChat
   "Delete a chat and its transcript"
   deleteChat(chatId: Long!): Boolean
+  "Revoke one of the signed-in user's standing approvals; matching calls ask again from the next one"
+  revokeApprovalGrant(approvalGrantId: Long!): Boolean
+  "Revoke every standing approval the signed-in user holds in this organization"
+  revokeAllApprovalGrants: Boolean
 }
 
 type AiChatQueries {
@@ -532,6 +734,8 @@ type AiChatQueries {
   listChats(processId: Long, "Chat subject kind: workflow | agent | home" subjectKind: String, subjectId: Long): [WorkflowChat!]
   "Get a chat with one page of its transcript, newest page first (cursor by seq)"
   getChat(chatId: Long!, beforeSeq: Long, limit: Int): ChatDataGql
+  "The signed-in user's standing approvals (\"Approve always\") in this organization: one row per tool key, with usage counters"
+  approvalGrants: [ApprovalGrant!]
 }
 
 type AiChatSubscriptions {
@@ -566,20 +770,33 @@ type AiModelInfo {
   outputCostPerToken: Float
 }
 
+type ApiKeyEndpointScope {
+  processPublicId: String!
+  name: String!
+}
+
 type ApiKeyMutations {
-  "Create an organization API key for the GraphQL API (name + explicit permission set + optional expiry). Returns the plaintext key exactly once. Requires Owner or Admin role; API-key-authenticated requests can never manage keys."
-  createApiKey(name: String!, permissions: PermissionsInput!, expiresAt: ZonedDateTime): CreatedApiKey
-  "Replace an API key's permission set. Requires Owner or Admin role."
+  "Create an organization API key (name + explicit GraphQL permission set + optional expiry + optional scopes). Omitting scopes grants GraphQL access only; endpoint scopes (endpoint:invoke per endpoint public id, endpoint:results:read) additionally require canBuildWorkflows. Returns the plaintext key exactly once. Requires canManageApiKeys and selected permissions within your current grants; API-key-authenticated requests can never manage keys."
+  createApiKey(name: String!, permissions: PermissionsInput!, expiresAt: ZonedDateTime, scopes: ApiKeyScopesInput): CreatedApiKey
+  "Create a personal API key acting as you within the current organization. Selected GraphQL permissions cannot exceed your current role; authentication intersects them with that role afresh. Omitting scopes grants GraphQL access only; endpoint scopes require canBuildWorkflows. Requires a user session and canCreateApiKeys. Returns plaintext exactly once."
+  createPersonalApiKey(name: String!, permissions: PermissionsInput!, expiresAt: ZonedDateTime, scopes: ApiKeyScopesInput): CreatedApiKey
+  "Replace an API key's permission set within your current grants. Organization keys require canManageApiKeys; personal keys require ownership."
   updateApiKeyPermissions(orgApiKeyId: Long!, permissions: PermissionsInput!): OrgApiKey
-  "Rotate (cycle) an API key: new key material on the same key (name, permissions and expiry are kept); the old key stops working immediately. Returns the new plaintext key exactly once. Requires Owner or Admin role."
+  "Replace an API key's scopes: GraphQL access, the endpoint allowlist (public ids), async result reads and the Endpoints-section limits. Endpoint scopes require canBuildWorkflows; limits may only lower the defaults. Organization keys require canManageApiKeys; personal keys require ownership. Revoking all scopes is refused."
+  updateApiKeyScopes(orgApiKeyId: Long!, scopes: ApiKeyScopesInput!): OrgApiKey
+  "Rotate (cycle) an API key: new key material on the same key (name, permissions and expiry are kept); the old key stops working immediately. Returns the new plaintext key exactly once. Organization keys require canManageApiKeys and all stored grants; personal keys require ownership."
   rotateApiKey(orgApiKeyId: Long!): String
-  "Revoke (delete) an API key; it stops working immediately. Requires Owner or Admin role."
+  "Soft revoke an API key, retaining its row for provenance; it stops working immediately. Requires canManageApiKeys, or ownership of a personal key."
   revokeApiKey(orgApiKeyId: Long!): Boolean
 }
 
 type ApiKeyQueries {
-  "List the organization's API keys — names, display prefixes, permissions and expiry; the key material is never returned. Requires Owner or Admin role."
+  "List active organization and personal API keys with owner and approximate usage metadata; key material is never returned. Requires canManageApiKeys and a user session."
   listApiKeys: [OrgApiKey!]
+  "List your active personal API keys in the current organization. Requires an enabled member user session."
+  listMyApiKeys: [OrgApiKey!]
+  "Active API keys scoped to invoke the given endpoint (process public id): every one for a caller with canManageApiKeys, otherwise only the caller's own personal keys. Requires a user session."
+  listKeysForEndpoint(processPublicId: String!): [OrgApiKey!]
 }
 
 type App {
@@ -630,6 +847,18 @@ type AppData {
   hosts: [AppHost!]!
   files: [AppFileSummary!]!
   agents: [AppAgent!]!
+  endpoints: [AppEndpoint!]!
+}
+
+type AppEndpoint {
+  appId: Long!
+  processId: Long!
+  processPublicId: String!
+  name: String!
+  description: String!
+  released: Boolean!
+  paused: Boolean!
+  createdAt: String!
 }
 
 type AppFile {
@@ -676,6 +905,8 @@ type AppMutations {
   mintAppTicket("Which of the app's two origins (draft or release) to sign in to" appHostId: String!): String
   "Replace the agents this app may invoke. Requires canManageReleases, not just build access: every user of the app can then spend the organization's AI budget through them"
   setAppAgents(publicId: String!, "The COMPLETE list of agents this app may invoke. Anything omitted is undeclared" agentPublicIds: [String!]!): [AppAgent!]
+  "Replace the endpoints this app may invoke. Requires canManageReleases and canBuildWorkflows: declaring is a grant, and only someone who may run an endpoint may hand it to an app"
+  setAppEndpoints(publicId: String!, "The COMPLETE list of endpoints (process public ids) this app may invoke. Anything omitted is undeclared, and an app session calling an undeclared endpoint is refused with 403 app_endpoint_not_declared" processPublicIds: [String!]!): [AppEndpoint!]
 }
 
 type AppQueries {
@@ -706,6 +937,41 @@ type AppVersion {
   activeBuildId: Long
   createdAt: String!
   updatedAt: String!
+}
+
+type ApprovalGrant {
+  approvalGrantId: Long!
+  toolKey: String!
+  useCount: Long!
+  lastUsedAt: String
+  createdAt: String!
+  objectKind: String
+  objectId: Long
+  objectName: String
+}
+
+type AttributionActor {
+  kind: String!
+  name: String
+  deleted: Boolean!
+  via: String!
+  viaName: String
+  at: String!
+  links: [ActivityLink!]!
+}
+
+type AuditAttribution {
+  entityKind: String!
+  entityId: Long!
+  createdBy: String!
+  createdVia: String!
+  createdAt: String!
+  updatedBy: String!
+  updatedVia: String!
+  updatedAt: String!
+  entityPublicId: String
+  createdActor: AttributionActor
+  updatedActor: AttributionActor
 }
 
 type AuthMutations {
@@ -794,6 +1060,9 @@ type ChatSettings {
   maxToolCalls: Int!
   integrationId: Long
   model: String
+  disabledIntegrationIds: [Long!]!
+  disabledToolIds: [Long!]!
+  disabledMcpToolIds: [McpToolRef!]!
 }
 
 type CreateProcessResultGql {
@@ -820,14 +1089,51 @@ type EmbeddedPage {
 
 type EndpointMutations {
   "Create an Endpoint: a kind='endpoint' process, unpaused, with a draft workflow seeded with a Webhook Trigger"
-  createEndpoint("Unique within the org, across processes AND endpoints" name: String!, description: String!): ProcessData
+  createEndpoint("Unique within the org, across processes AND endpoints" name: String!, description: String!, "Run timeout in milliseconds for synchronous calls (default 25000). Maximum 270000 (4.5 minutes)." timeoutMs: Long): ProcessData
   "Delete an endpoint and its process"
   deleteEndpoint(processId: Long!): Boolean
+}
+
+type EndpointPublicAccessGql {
+  processPublicId: String!
+  "The bearer credential embedded in the URL. Treat it like a password-equivalent link: anyone holding it can call the endpoint."
+  token: String!
+  "POST here (relative to the API host, e.g. https://app.honeybase.ai) to call the endpoint without a login: /api/public/endpoints/<token>"
+  path: String!
+  "Exact origins whose browser pages may call the endpoint (CORS). Empty = only non-browser callers, plus any deployment-wide origins. Always empty when allowAnyOrigin is true."
+  allowedOrigins: [String!]!
+  "true = any website may call the endpoint from a browser; allowedOrigins is then ignored (and empty)."
+  allowAnyOrigin: Boolean!
+  createdAt: String!
+  updatedAt: String!
 }
 
 type EndpointQueries {
   "List the organization's Endpoints (kind='endpoint' processes). Deliberately disjoint from processes.listProcesses"
   listEndpoints: [ProcessData!]
+}
+
+type EntityActivity {
+  eventId: String!
+  occurredAt: String!
+  entityKind: String!
+  entityId: Long!
+  entityLabel: String!
+  deleted: Boolean!
+  operation: String!
+  operationId: String!
+  actor: ActivityActor!
+  origin: ActivityActor
+  changes: [ActivityChange!]!
+  truncated: Boolean!
+}
+
+type EntityActivityPage {
+  events: [EntityActivity!]!
+  nextCursor: String
+  hasMore: Boolean!
+  truncated: Boolean!
+  entity: ActivityEntity
 }
 
 type Folder {
@@ -948,6 +1254,7 @@ type Integration {
   enabled: Boolean!
   config: String!
   infisicalCredentialsRef: String!
+  barryEnabled: Boolean!
 }
 
 type IntegrationMutations {
@@ -955,6 +1262,8 @@ type IntegrationMutations {
   createIntegration(integrationType: String!, name: String!, config: String!, secret: String!): Integration
   "Update an integration name, enabled and config (requires canManageIntegrations permission)"
   updateIntegration(integrationId: Long!, name: String!, enabled: Boolean!, config: String!, secret: String): Integration
+  "Set whether the Barry AI copilot may use this integration from chat: its read-only native tools run directly, its mutating ones only behind an approval card the member answers; for an MCP connection, whether Barry may call the tools an administrator approved on it (read-only ones directly, mutating ones behind a card). On by default; a per-connection administrator opt-out (requires canManageIntegrations permission)"
+  setIntegrationBarryEnabled(integrationId: Long!, barryEnabled: Boolean!): Integration
   "Delete an integration (requires canManageIntegrations permission)"
   deleteIntegration(integrationId: Long!): Boolean
   "Test a database connection with the given parameters"
@@ -984,6 +1293,7 @@ type IntegrationQueries {
   listSlackChannels(integrationId: Long!): [SlackChannelRef!]
   "List the users (members) of a Slack workspace"
   listSlackUsers(integrationId: Long!): [SlackUserRef!]
+  slackCapabilities(integrationId: Long!): SlackCapabilities
   "List the approved message templates of a WhatsApp Business integration"
   listWhatsappTemplates(integrationId: Long!): [WhatsappTemplateRef!]
   "List the AI providers available from the LiteLLM model catalog"
@@ -1072,6 +1382,8 @@ type McpConnectionDetail {
 }
 
 type McpConnectionMutations {
+  "Suggest a tier for one current tool definition; never approves (requires canManageIntegrations)"
+  suggestMcpToolTier(integrationId: Long!, toolName: String!, expectedDefinitionHash: String!, aiIntegrationId: Long!, model: String!): McpConnectionTool
   "Contact the server now and reconcile the tool ledger (requires canManageIntegrations)"
   syncMcpConnection(integrationId: Long!): McpConnectionDetail
   "Approve tools at an access tier, pinning the reviewed definitions"
@@ -1085,7 +1397,7 @@ type McpConnectionMutations {
 type McpConnectionQueries {
   "One MCP connection: its advertised tools with approval state, pins and last-sync status"
   mcpConnection(integrationId: Long!): McpConnectionDetail
-  "All MCP connections of the org with their tool ledgers (names, tiers, statuses — no schemas or pins), for the agent builder's attach surface"
+  "All MCP connections of the org with their tool ledgers (names, tiers, statuses — no schemas or pins), for the agent builder's attach surface and the Barry composer's MCP tools section (requires an agent permission or canManageIntegrations)"
   listMcpConnections: [McpConnectionSummary!]
 }
 
@@ -1122,6 +1434,16 @@ type McpConnectionTool {
   approvedByName: String
   approvedAt: String
   lastSeenAt: String
+  suggestion: McpTierSuggestion
+}
+
+type McpTierSuggestion {
+  tier: String!
+  reason: String!
+  definitionHash: String!
+  aiIntegrationId: Long!
+  model: String!
+  generatedAt: String!
 }
 
 type McpToolListing {
@@ -1134,6 +1456,11 @@ type McpToolListing {
 type McpToolRef {
   integrationId: Long!
   toolName: String!
+}
+
+type MemberDeactivationPlan {
+  unfinishedTaskCount: Int!
+  teams: [Team!]!
 }
 
 type MetadataBadge {
@@ -1199,6 +1526,7 @@ type MyWorkSummary {
   acceptingProcesses: Int!
   totalProcesses: Int!
   pendingTasks: Long!
+  needsYouTasks: Long!
 }
 
 "A native agent tool: implemented server-side and bound to one integration, no backing workflow. `name` is the derived function name (`<integration_slug>_<action>`) before any collision suffix."
@@ -1247,6 +1575,7 @@ type Notification {
   metadata: String
   createdAt: String!
   read: Boolean!
+  organizationId: Long
 }
 
 type NotificationMutations {
@@ -1304,6 +1633,17 @@ type OrgApiKey {
   expiresAt: String
   createdByEmail: String!
   createdAt: String!
+  keyKind: String!
+  ownerWebUserId: Long
+  ownerEmail: String
+  ownerName: String
+  lastUsedAt: String
+  ownerPermissions: Permissions
+  graphqlAccess: Boolean!
+  endpointScopes: [ApiKeyEndpointScope!]!
+  readsRunResults: Boolean!
+  rateLimitPerMinute: Int
+  maxConcurrency: Int
 }
 
 type OrgDatabase {
@@ -1465,6 +1805,9 @@ type Permissions {
   canManageTasks: Boolean
   canViewRunHistory: Boolean
   canOverrideTaskCompletion: Boolean
+  canManageApiKeys: Boolean
+  canCreateApiKeys: Boolean
+  canManageDashboards: Boolean
 }
 
 type ProcessAcceptance {
@@ -1490,7 +1833,7 @@ type ProcessData {
 
 type ProcessMutations {
   "Create a new process with a default workflow"
-  createProcess(name: String!, description: String!): CreateProcessResultGql
+  createProcess(name: String!, description: String!, kind: String, timeoutMs: Long): CreateProcessResultGql
   "Create a new workflow in a process, optionally duplicating an existing workflow"
   createWorkflow(processId: Long!, name: String!, description: String, duplicateWorkflowId: Long): WorkflowDataGql
   "Save changes to a workflow's nodes and edges"
@@ -1505,22 +1848,30 @@ type ProcessMutations {
   validateJsPackages(packages: [JsPackageInput!]!): [JsPackageValidationResult!]
   "Update the JavaScript packages on a process (shared across all its workflow versions). Allowed even when releases are immutable."
   updateProcessJsPackages(processId: Long!, packages: [JsPackageInput!]!): ProcessData
+  "Update the process name and description without changing workflow versions or publishing."
+  updateProcessDetails(processId: Long!, name: String!, description: String!): ProcessData
   "Update a process's operational settings (timeout, loop concurrency, failure notification), shared by all its workflow versions. Allowed even when releases are immutable."
   updateProcessSettings(processId: Long!, settings: ProcessSettingsInput!): ProcessData
   "Declare an endpoint's request/response contract, or clear it by passing null. Each half is an optional JSON Schema (the same subset Agent tools use). The request half is ENFORCED: a call whose body does not match is refused with 400 before the workflow runs. The response half is observed and counted, never enforced, so a schema edit cannot break live traffic. Endpoints only; unversioned, so re-releasing the workflow never changes it."
   updateEndpointContract(processId: Long!, contract: String): ProcessData
   "Set the paused state of a process"
   setProcessPaused(processId: Long!, paused: Boolean!): ProcessData
+  "Make an endpoint callable WITHOUT a login at POST /api/public/endpoints/<token> (for static sites), rotate that token, set the browser origins allowed to call it, or revoke it. Off by default. Anyone holding the token can call the endpoint, so return only what a stranger may see. Requires canManageReleases and canBuildWorkflows. Returns the resulting state, or null when the endpoint is not public."
+  setEndpointPublicAccess(processPublicId: String!, "true = make the endpoint public (mints a token if it has none; an already-public endpoint keeps its token). false = revoke: the URL stops working immediately. Cannot be combined with rotate, allowedOrigins or allowAnyOrigin." enabled: Boolean, "true = replace the token; the previous URL stops working immediately. Only on an endpoint that is already public, unless enabled: true is sent too (a rotation never makes an endpoint public)." rotate: Boolean, "REPLACES the origins (exact scheme://host[:port], e.g. https://example.com) whose browser pages may call the endpoint. A request carrying any other Origin header is refused with 403 before the workflow runs; requests without an Origin (servers, curl) are allowed. [] = no browser page may call (the default when public access is first enabled). At most 20. Cannot be combined with allowAnyOrigin: true." allowedOrigins: [String!], "true = ANY website may call the endpoint from a visitor's browser (any Origin, including 'null'), so any page can make a visitor's browser trigger it. false = only allowedOrigins (none if it is omitted). Omitted = unchanged." allowAnyOrigin: Boolean): EndpointPublicAccessGql
   "Generate (or regenerate) an API key for a webhook; returns the plaintext key once"
   generateWebhookApiKey(webhookId: Long!): String
   "Manually run a process now through one of its trigger nodes. Authenticated by the caller's session and bypasses the paused state (pause only gates automated webhook/schedule triggers); records run history with a Manual source."
   runProcess(processId: Long!, triggerNodeName: String!, payload: String): Boolean
+  "Confirm an MCP run authorization request and start the run under the caller's own session. Requires the session of the user who was asked; single-use (a second confirm is rejected as already answered), rejected once the 30-minute window has passed. Same permission (canBuildWorkflows), same Manual source and same run-history row as runProcess. Returns the updated preview with runWorkflowId set, or with status failed and a failureReason when the run could not start."
+  confirmRunAuthorization(publicId: String!, "Also record a standing approval for MCP runs (\"Approve always\"): from then on, request_run_authorization starts the run immediately for this user instead of minting a link. Personal, revocable from the Standing approvals list, never widens permissions." alwaysAllow: Boolean): RunAuthorizationPreview
+  "Decline an MCP run authorization request. Requires the session of the user who was asked; nothing runs and the assistant polling get_run_authorization sees status declined."
+  declineRunAuthorization(publicId: String!): RunAuthorizationPreview
   "Cancel a run: a queued run is dropped before it executes; a running run stops at the next node boundary."
   cancelRun(runWorkflowId: Long!): Boolean
   "Cancel an in-memory (editor test) run by its run UUID; it stops at the next node boundary. These runs have no run history row, so they cannot be cancelled through cancelRun."
   cancelInMemoryRun(runId: String!): Boolean
   "Mint a short-lived signed download URL for a file produced by a workflow node. Takes the `id` from the file reference in a node's output. Org-scoped: holding a reference is not authority to read the file, so the URL is minted per request for an authenticated member of the owning organization and is never stored in run state, the run cache, or an AI context."
-  workflowFileDownloadUrl(publicId: String!, source: String): String
+  workflowFileDownloadUrl(publicId: String!, source: String, inline: Boolean): String
   "Sign a direct browser upload of a file for use in workflows, and record it pending. The browser POSTs the bytes straight to the bucket with the returned fields (the `file` part last) and then calls `commitWorkflowFileUpload` with the returned public id. Requires canBuildWorkflows; the file counts against the organization's storage quota and is reaped on the same 30-day clock as files produced by runs."
   requestWorkflowFileUploadUrl(fileName: String!, contentType: String!, declaredSize: Long!): WorkflowFileUploadTicket
   "Verify an uploaded file landed and mark it committed, returning the file reference to use in expressions. The size declared when the upload was requested is a client claim; this checks the real object size."
@@ -1537,15 +1888,19 @@ type ProcessQueries {
   "Get a specific workflow by ID with all its nodes and edges"
   getWorkflow(workflowId: Long, publicId: String): WorkflowDataGql
   "List the production run history of a process, newest first"
-  listProcessRuns(processId: Long!, phase: String, from: String, to: String, limit: Int, offset: Int): [RunSummary!]
+  listProcessRuns(processId: Long!, phase: String, from: String, to: String, limit: Int, offset: Int, includeTestRuns: Boolean): [RunSummary!]
   "Get the full node-by-node detail of a single run"
-  getProcessRun(runWorkflowId: Long!): RunWorkflowDataGql
+  getProcessRun(runWorkflowId: Long!, processId: Long): RunWorkflowDataGql
   "Aggregated stats for a process (task counts + recent run metrics) backing the process card tiles"
   getProcessStats(processId: Long!): ProcessStats
   "Run queue tiles: live queued/running + historical completed/failed counts and the configured queue size"
   getProcessRunCounts(processId: Long!): RunQueueStats
   "Bounded workflow metadata for a process. released=true → published versions (newest first), released=false → drafts (recently edited first)"
   listWorkflows(processId: Long!, released: Boolean!, limit: Int!, offset: Int!): [Workflow!]
+  "Preview an MCP run authorization request by its public id (the /run-authorization/<id> link). Requires a session: the requesting user sees the process, trigger, released version and the payload the assistant proposed; another member of the same organization sees only its status (isForCurrentUser=false); another organization sees not-found."
+  runAuthorization(publicId: String!): RunAuthorizationPreview
+  "An endpoint's public (no-login) access: its token, path and allowed browser origins, or null when it is not public. Requires canBuildWorkflows."
+  endpointPublicAccess(processPublicId: String!): EndpointPublicAccessGql
 }
 
 type ProcessSettings {
@@ -1570,7 +1925,7 @@ type ProcessSubscriptions {
   "Subscribe to real-time node-by-node updates of a single run (forward or backward)"
   watchRun(runId: String!): [RunWorkflowDataGql!]
   "Subscribe to real-time run-status changes for a process (the Run History list)"
-  watchProcessRuns(processId: Long!): [RunSummary!]
+  watchProcessRuns(processId: Long!, includeTestRuns: Boolean): [RunSummary!]
 }
 
 type Queries {
@@ -1625,6 +1980,14 @@ type Queries {
   formResponses: FormResponseQueries!
   "Folder and tag (list view organization) queries"
   organize: OrganizeQueries!
+  "Bounded committed history using current entity read permissions; deleted roots require Owner/Admin"
+  entityActivity(entityKind: String!, entityId: Long!, cursor: String, limit: Int): EntityActivityPage
+  "Same as entityActivity, addressed by the entity's public ID (UUID). Live entities only; deleted history requires entityActivity with the stable numeric ID"
+  entityActivityByPublicId(entityKind: String!, entityPublicId: String!, cursor: String, limit: Int): EntityActivityPage
+  "Organization activity including deleted entities. Requires Owner/Admin; API keys cannot use it"
+  organizationActivity(cursor: String, limit: Int): EntityActivityPage
+  "Creation and latest-change attribution for up to 100 current entities; uses existing entity read permissions. createdActor/updatedActor carry the actor as data: kind is user, api_key, workflow, agent, system or none (the change predates activity tracking); new kinds may be added, treat unknown values as system. createdBy/updatedBy and the via strings are the legacy pre-rendered labels"
+  auditAttribution(entityKind: String!, entityIds: [Long!]!): [AuditAttribution!]
 }
 
 type ReassignPlan {
@@ -1666,6 +2029,27 @@ type RootResolverQueriesMutationsSubscriptions {
   subscriptionResolver: Subscriptions
 }
 
+type RunAuthorizationPreview {
+  publicId: String!
+  status: String!
+  isExpired: Boolean!
+  isForCurrentUser: Boolean!
+  expiresAt: String!
+  requestedAt: String!
+  respondedAt: String
+  mcpClientId: String
+  processPublicId: String
+  processName: String
+  processPaused: Boolean!
+  triggerNodeName: String
+  releasedVersion: String
+  releaseChanged: Boolean!
+  payload: String
+  runWorkflowId: Long
+  failureReason: String
+  autoApproved: Boolean!
+}
+
 type RunNodeGql {
   runNodeId: Long!
   runWorkflowId: Long!
@@ -1699,6 +2083,8 @@ type RunSummary {
   failedAtNode: String
   startedAt: String!
   durationMillis: Long
+  isTest: Boolean!
+  testOrigin: String
 }
 
 type RunWorkflow {
@@ -1757,6 +2143,10 @@ type SheetRef {
   title: String!
 }
 
+type SlackCapabilities {
+  emailRecipients: Boolean
+}
+
 type SlackChannelRef {
   id: String!
   name: String!
@@ -1802,8 +2192,16 @@ type TaskEventGql {
   task: WorkflowTask!
 }
 
+type TaskFile {
+  id: String!
+  name: String!
+  contentType: String!
+  sizeBytes: Long!
+  source: String!
+}
+
 type TaskForm {
-  formId: Long!
+  formId: Long
   name: String!
   schemaSnapshot: String!
   version: Int!
@@ -1811,13 +2209,14 @@ type TaskForm {
   autoComplete: Boolean!
   submission: FormSubmission
   prefillData: String
+  presentation: String
 }
 
 type TaskMutations {
   "Create a new task"
   createTask(task: WorkflowTaskInput!): WorkflowTask
   "Create a new task with user or team-based assignment. Provide userId for direct assignment or teamId for random team member assignment."
-  createTaskWithAssignment(name: String!, dueDate: LocalDate!, priority: String!, userId: Long, teamId: Long, relatedWorkflow: Long, description: String, metadata: String, embeddedPages: [EmbeddedPageInput!]): WorkflowTask
+  createTaskWithAssignment(name: String!, dueDate: LocalDate!, priority: String!, userId: Long, teamId: Long, relatedWorkflow: Long, description: String, metadata: String, embeddedPages: [EmbeddedPageInput!], teamAssigneeMethod: String): WorkflowTask
   "Mark task as completed or incomplete"
   updateTaskStatus(taskId: Long!, completed: Boolean!): WorkflowTask
   "Reassign task to another user"
@@ -1834,6 +2233,18 @@ type TaskMutations {
   updateTaskEmbeddedPages(taskId: Long!, pages: [EmbeddedPageInput!]!): WorkflowTask
   "Update task team"
   updateTaskTeam(taskId: Long!, teamId: Long): WorkflowTask
+  "Take the agent off a task, closing its session. The task keeps its human owner and its history."
+  stopTaskAgent(taskId: Long!): WorkflowTask
+  "Take a task back from an agent that is waiting on someone (a question, an approval, a timer, an update or a report to read): the session ends as Stopped with your name as the reason, its pending request is cancelled, and the agent stays on the task so it can be started again. The task's owner, their team or an agent administrator. Fails while the agent is working: stop it instead."
+  takeOverTaskAgent(taskId: Long!): WorkflowTask
+  "Start the agent already on a task now: a scheduled start happens immediately, a waiting agent is woken, and a stopped, handed-back, failed or finished one opens a fresh session on the same budget. Fails while the agent is working or waiting on a person."
+  startTaskAgent(taskId: Long!): WorkflowTask
+  "Answer the agent's pending request on a task: approve, reject with a message, approve with edited arguments, or reply to its question. Answering wakes the agent. Only the request's target (or an agent administrator) may answer."
+  answerAgentRequest(agentSessionRequestId: Long!, "Approval only: true to approve, false to reject. Ignored for a question." approved: Boolean, "The answer to a question, or the reason for rejecting a tool call (the agent sees it and adapts)." text: String, "Approval only: arguments edited before approving, re-validated against the tool's schema." editedArguments: String, "Form-backed question only: the SurveyJS answers JSON, validated against the form frozen onto the request. Required when the request carries a form; ignored otherwise." formData: String): AgentSessionRequest
+  "Approve the plan a Plan-then-execute agent proposed, starting a fresh autonomous session that carries it out, or send the plan back with a message for the agent to re-plan."
+  decideAgentPlan(taskId: Long!, approved: Boolean!, "When rejecting: what to change. The agent re-plans with this in context, and it counts as a wake-up." message: String): WorkflowTask
+  "Rate an agent's finished work on a task (Worked / Partly / Wrong) with a comment. Offered on finished sessions only; the task's owner, their team or an agent administrator may rate. Re-rating overwrites. Returns the refreshed Agent tab view."
+  rateAgentTask(agentSessionId: Long!, "Worked, Partly or Wrong" rating: String!, "What should have happened. The feedback interviewer works from it." comment: String): AgentTaskSessionView
   "Submit the member's answers to the task's form (SurveyJS result JSON). Fails if the task has no form or was already submitted; auto-completes the task when the form is configured to."
   submitTaskForm(taskId: Long!, formData: String!): WorkflowTask
   "Request a signed direct-upload ticket for a file attachment on the task's form. Assignee-only; enforces the per-file size cap, MIME allowlist and org storage quota. The browser POSTs the file to the returned url with the given fields, then stores objectKey as the SurveyJS file value."
@@ -1843,7 +2254,7 @@ type TaskMutations {
   "Delete a task"
   deleteTask(taskId: Long!): Boolean
   "Apply the same changes to many tasks at once (fields left null are unchanged)"
-  batchUpdateTasks(taskIds: [Long!]!, completed: Boolean, priority: String, assignedTo: Long, dueDate: LocalDate, changeTeam: Boolean!, teamId: Long): [WorkflowTask!]
+  batchUpdateTasks(taskIds: [Long!]!, completed: Boolean, priority: String, assignedTo: Long, dueDate: LocalDate, changeTeam: Boolean!, teamId: Long, assignment: TaskAssignmentInput): [WorkflowTask!]
   "Append a note to many tasks at once (append-only; never overwrites existing notes)"
   batchAppendTaskNotes(taskIds: [Long!]!, text: String!): [WorkflowTask!]
   "Delete many tasks at once. Returns the number deleted."
@@ -1865,6 +2276,8 @@ type TaskQueries {
   taskTimeSeries("Bucket size: hour, day, week, or month" granularity: String!, "completed (by completion time) or pending (by due date)" mode: String!, "Inclusive start of the range (by completion/due date)" from: LocalDate!, "Inclusive end of the range (by completion/due date)" to: LocalDate!, assignedTo: [Long!], relatedTeams: [Long!], relatedProcesses: [Long!], priorities: [String!], "IANA zone the Hour buckets are computed in (e.g. America/Mexico_City). Defaults to UTC — never the server JVM default." timezone: String): [TaskSeriesPoint!]
   "One newest-first page of the task's audit trail (who changed which field, old -> new), with resolved actor display info"
   taskUpdates(taskId: Long!, "Pagination cursor: return audit rows with taskUpdateId strictly below this (newest page when omitted)." before: Long, "Page size; server-clamped to 1-100 (default 50)." limit: Int): TaskUpdatesPage
+  "The agent session working this task, with its timeline and the runs behind it. Null when no agent has ever worked the task."
+  taskAgentSession(taskId: Long!): AgentTaskSessionView
 }
 
 type TaskSeriesPoint {
@@ -1929,6 +2342,9 @@ type TaskViewFilters {
   searchQuery: String
   dueFromTime: String
   dueToTime: String
+  statuses: [String!]
+  agentFilter: String
+  modes: [String!]
 }
 
 type TaskViewMutations {
@@ -2017,6 +2433,7 @@ type Tool {
   enabled: Boolean!
   createdAt: String!
   updatedAt: String!
+  barryEnabled: Boolean!
 }
 
 type ToolData {
@@ -2034,6 +2451,8 @@ type ToolMutations {
   updateTool(toolId: Long!, name: String!, description: String!, "Input JSON Schema (supported subset; validated on save and on every dispatch)" inputSchema: String!, "ToolOutputSelection JSON; omitted = the terminal node's output" outputSelection: String, access: String!, enabled: Boolean!): ToolData
   "Delete a tool and its process; blocked while agents still reference it"
   deleteTool(toolId: Long!): Boolean
+  "Release the tool to the Barry AI copilot, or withdraw it: a read-only tool then runs directly from a home chat as a real run of its process, a mutating one only behind an approval card the member answers. Off by default; enabling requires a released workflow. Requires canManageAgents permission"
+  setToolBarryEnabled(toolId: Long!, barryEnabled: Boolean!): ToolData
 }
 
 type ToolOutputSelection {
@@ -2078,17 +2497,18 @@ type UserData {
 
 type UserMutations {
   "Create a new user in the organization (requires canManageUsers permission). Returns an outcome rather than failing when the email already has an account: `accountExistsElsewhere` means the address belongs to a real person in another organization, who must be invited and must consent."
-  createUser(firstName: String!, lastName: String, email: String!, roleId: Long): CreateUserResult
+  createUser(firstName: String!, lastName: String, email: String!, roleId: Long, teamIds: [Long!]): CreateUserResult
   "Update a user's role in this organization (requires canManageUsers permission). For an external member this changes their role here only, never in their home organization."
   updateUserRole(webUserId: Long!, roleId: Long!): UserData
-  "Enable or disable a user (requires canManageUsers permission). Rejected for external members: the flag is global, so it would lock them out of their own organization — remove their access instead."
+  "Enable or disable membership in this organization (requires canManageUsers). Use deactivateMember to reassign unfinished tasks atomically. Enabling does not restore teams or tasks."
   setUserDisabled(webUserId: Long!, isDisabled: Boolean!): UserData
+  deactivateMember(webUserId: Long!, destination: TaskAssignmentInput): UserData
   "Update a user's profile: name, last name, email and Slack id. A user may always edit themselves; editing other users requires canManageUsers permission. Name and email are rejected for external members, whose identity belongs to their own organization."
   updateUserProfile(webUserId: Long!, firstName: String!, lastName: String, email: String!, slackId: String): UserData
   "Set a member's Slack id for this organization only. Unlike updateUserProfile this cannot touch global identity fields, which is what makes it usable on external members."
   setMemberSlackId(webUserId: Long!, slackId: String): UserData
   "Invite an existing account to join this organization as an external member (requires canManageUsers permission). Access is granted only once they accept."
-  inviteExistingUser(email: String!, roleId: Long): OrganizationInvitation
+  inviteExistingUser(email: String!, roleId: Long, teamIds: [Long!]): OrganizationInvitation
   "Issue a fresh token and a fresh 48h window on a pending invitation (requires canManageUsers permission)"
   resendInvitation(invitationId: Long!): OrganizationInvitation
   "Withdraw a pending invitation (requires canManageUsers permission)"
@@ -2114,6 +2534,7 @@ type UserQueries {
   invitationByToken(token: String!): InvitationPreview
   "What removing an external member's access would do, so the confirmation dialog can state it (requires canManageUsers permission)"
   planRemoveAccess(webUserId: Long!): RemoveAccessPlan
+  planDeactivation(webUserId: Long!): MemberDeactivationPlan
 }
 
 type Webhook {
@@ -2217,6 +2638,12 @@ type WorkflowTask {
   completedAt: ZonedDateTime
   createdAt: ZonedDateTime
   completionLocked: Boolean
+  files: [TaskFile!]
+  agentId: Long
+  agentMode: String
+  agentState: String
+  agentSessionId: Long
+  agentKickoffAt: ZonedDateTime
 }
 
 schema {

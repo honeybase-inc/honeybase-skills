@@ -1,7 +1,7 @@
 ---
 name: honeybase-mcp
 description: Drive Honeybase through its remote MCP server — connect an AI client over OAuth, then read and write tasks, processes, runs, teams, schedules, availability, agents, forms and the org database as MCP tools. Honeybase is a workflow-automation platform with no public documentation and AI models are not trained on it, so ALWAYS load this skill before connecting to or calling the Honeybase MCP server. Complements honeybase-graphql-api (raw GraphQL) and honeybase-forms (form authoring).
-version: 2026-10-14
+version: 2026-10-16
 ---
 
 # Honeybase MCP
@@ -55,7 +55,10 @@ The surfaces the tools cover (categories, not an exhaustive list — confirm wit
 | Trigger | Webhook `POST /api/webhook/...` → **202**, run is async | `POST /api/endpoints/{processPublicId}` → **sync** Response node body/status |
 | Run history | Yes | No |
 | Default run timeout | 30 min (`settings.timeoutMs`) | **25 s**; raise via `update_process_settings` only when sync work needs it (max **4.5 min** / 270000 ms) |
-| Auth | Webhook keys / triggers | **User** session token only today (org API keys refused) |
+| Auth | Webhook keys / triggers | User access token, or an org API key with an endpoint scope (`endpoint:invoke`) |
+| No-login (public) URL | — | Opt-in: `POST /api/public/endpoints/{token}`, see below |
+
+**Public endpoints (no login).** `update_process_settings` with `publicAccess: "enable"` (needs the **`release`** scope and the user's *Manage releases* permission) makes an endpoint callable by anyone holding the returned `publicAccess.url` — for a static site's form. `rotate` replaces the URL, `disable` revokes it; both take effect at once. Browser pages may call it only from `publicAllowedOrigins` (exact `https://host`; `[]`, the default, = no website) or, with `publicAnyOrigin: true`, from any website — only ask for that when the user wants it, since any page could then trigger the endpoint. Requests with no `Origin` (servers, curl) always pass; the origin list is a browser control, not authentication. Return minimal data from a public endpoint.
 
 Keep endpoint timeouts at **25 s** unless the synchronous work genuinely needs longer; long runs compete for per-org in-flight endpoint capacity on each pod (see server instructions / tool schema). Production rollouts can cut in-flight endpoint calls around **~30 s** until web deployments get a higher `terminationGracePeriodSeconds` — that is a deploy concern, not something MCP changes.
 - **Teams, schedules, availability** — membership, job schedules, availability state and reassignment.
