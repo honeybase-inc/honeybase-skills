@@ -25,6 +25,7 @@ enum ChatSubjectKind {
   App
   Home
   TaskFeedback
+  Thread
   Workflow
 }
 
@@ -312,6 +313,24 @@ type AccessToken {
   token: String!
   expiresIn: Long!
   tokenType: String!
+}
+
+type ActionAuthorizationPreview {
+  publicId: String!
+  kind: String!
+  toolName: String!
+  status: String!
+  isExpired: Boolean!
+  isForCurrentUser: Boolean!
+  expiresAt: String!
+  requestedAt: String!
+  respondedAt: String
+  mcpClientId: String
+  op: String
+  changed: Boolean!
+  failureReason: String
+  autoApproved: Boolean!
+  isRunning: Boolean!
 }
 
 type ActivityActor {
@@ -719,8 +738,10 @@ type AgentVersion {
 type AiChatMutations {
   "Create an AI copilot chat on a process"
   createChat(processId: Long, "Chat subject kind: workflow | agent | home" subjectKind: String, subjectId: Long, name: String!, "ChatSettings json (mode, maxToolCalls, integrationId, model, disabledIntegrationIds, disabledToolIds, disabledMcpToolIds)" settings: String, "Which surface opened this chat: direct | fix_with_barry | home. Metrics only - gates nothing." origin: String): WorkflowChat
+  "Open the signed-in member's Barry thread in this organization - their one conversation with Barry, reached from every page - creating it on first call. Their idle per-subject chats are folded into it first (copied in time order; the chats stay readable and stop taking messages)."
+  openBarryThread: WorkflowChat
   "Send a user message and start the copilot's turn (streams via watchChat)"
-  sendChatMessage(chatId: Long!, content: String!, "Workflow chats: the current canvas graph — becomes the chat's working graph" workflowData: WorkflowDataGqlInput, "Agent chats: the builder form's AgentDraftSnapshot JSON — becomes the chat's working draft" agentDraft: String, "App chats: the editor's AppDraftSnapshot JSON — a MANIFEST of the draft (identity, content digest, paths and sizes), never file contents. App files live in app_file and Barry writes them through AppService directly, so there is no working copy to carry" appSnapshot: String, "Home chats: the HomeSnapshot JSON (the organization the chat is scoped to)" homeContext: String, "Task-feedback chats: the TaskFeedbackSnapshot JSON (the agent session the interview is about)" taskFeedbackContext: String, "The AI connection this turn runs on. Omit (with model) to keep the chat's current one, or -- on a chat that has none -- to run on the organization's default AI connection: the Honeybase AI credits connection, else its only enabled AI connection. That is how a member who cannot list connections still sends." integrationId: Long, "The model for this turn. Omit to keep the chat's current one, or to use the connection's default model." model: String, "Public ids of already-uploaded workflow files to attach to this message (pasted images). Ids only: the server rebuilds each reference from its own row, so a name, type or size claimed by the client is never believed. Capped per message and by total bytes; every attachment is replayed on each subsequent turn of the chat." files: [String!]!): Boolean
+  sendChatMessage(chatId: Long!, content: String!, "Workflow chats: the current canvas graph — becomes the chat's working graph" workflowData: WorkflowDataGqlInput, "Agent chats: the builder form's AgentDraftSnapshot JSON — becomes the chat's working draft" agentDraft: String, "App chats: the editor's AppDraftSnapshot JSON — a MANIFEST of the draft (identity, content digest, paths and sizes), never file contents. App files live in app_file and Barry writes them through AppService directly, so there is no working copy to carry" appSnapshot: String, "Home chats: the HomeSnapshot JSON (the organization the chat is scoped to)" homeContext: String, "Task-feedback chats: the TaskFeedbackSnapshot JSON (the agent session the interview is about)" taskFeedbackContext: String, "The AI connection this turn runs on. Omit (with model) to keep the chat's current one, or -- on a chat that has none -- to run on the organization's default AI connection: the Honeybase AI credits connection, else its only enabled AI connection. That is how a member who cannot list connections still sends." integrationId: Long, "The model for this turn. Omit to keep the chat's current one, or to use the connection's default model." model: String, "Public ids of already-uploaded workflow files to attach to this message (pasted images). Ids only: the server rebuilds each reference from its own row, so a name, type or size claimed by the client is never believed. Capped per message and by total bytes; every attachment is replayed on each subsequent turn of the chat." files: [String!]!, "Barry threads only: the editor this message is sent from - workflow | agent | app | task_feedback - with focusId. Its snapshot rides in the matching argument above (workflowData, agentDraft, appSnapshot, taskFeedbackContext); with no focus, send homeContext." focusKind: String, "Barry threads only: the focused editor's subject id (process id, agent id, app id or agent session id)." focusId: Long, "Barry threads only: a SurfaceInput JSON saying where the user is ({page, objectKind?, objectId?, selection?, filters?}). Structure only: the server resolves every name under your own permissions and builds the note Barry reads from it." surface: String): Boolean
   "Stop the in-flight copilot turn"
   cancelChatTurn(chatId: Long!): Boolean
   "Approve or reject a pending tool call; with alwaysAllow, also grant it a standing approval"
@@ -2074,6 +2095,10 @@ type ProcessMutations {
   confirmRunAuthorization(publicId: String!, "Also record a standing approval for MCP runs (\"Approve always\"): from then on, request_run_authorization starts the run immediately for this user instead of minting a link. Personal, revocable from the Standing approvals list, never widens permissions." alwaysAllow: Boolean): RunAuthorizationPreview
   "Decline an MCP run authorization request. Requires the session of the user who was asked; nothing runs and the assistant polling get_run_authorization sees status declined."
   declineRunAuthorization(publicId: String!): RunAuthorizationPreview
+  "Confirm an MCP action authorization request and perform the action under the caller's own session, through the same executor Barry uses (every check re-runs). Requires the session of the user who was asked; single-use; rejected after the 30-minute window. Returns the updated preview (status confirmed, or failed with a failureReason)."
+  confirmActionAuthorization(publicId: String!, "Also record a standing approval for THIS tool over MCP (\"Confirm and always allow\"): from then on the assistant's request for it runs immediately for this user. Personal, revocable from the Standing approvals list, never widens permissions." alwaysAllow: Boolean): ActionAuthorizationPreview
+  "Decline an MCP action authorization request. Requires the session of the user who was asked; nothing happens and the assistant polling get_action_authorization sees status declined."
+  declineActionAuthorization(publicId: String!): ActionAuthorizationPreview
   "Cancel a run: a queued run is dropped before it executes; a running run stops at the next node boundary."
   cancelRun(runWorkflowId: Long!): Boolean
   "Cancel an in-memory (editor test) run by its run UUID; it stops at the next node boundary. These runs have no run history row, so they cannot be cancelled through cancelRun."
@@ -2107,6 +2132,8 @@ type ProcessQueries {
   listWorkflows(processId: Long!, released: Boolean!, limit: Int!, offset: Int!): [Workflow!]
   "Preview an MCP run authorization request by its public id (the /run-authorization/<id> link). Requires a session: the requesting user sees the process, trigger, released version and the payload the assistant proposed; another member of the same organization sees only its status (isForCurrentUser=false); another organization sees not-found."
   runAuthorization(publicId: String!): RunAuthorizationPreview
+  "Preview an MCP action authorization request (the /action-authorization/<id> link): a node test, a write to a connected system, an Agent or MCP tool write, a role change or an account disable an assistant asked for. Requires a session: the requesting user sees the card (`op`, the confirmation card's content as JSON); another member of the same organization sees only its status; another organization sees not-found."
+  actionAuthorization(publicId: String!): ActionAuthorizationPreview
   "An endpoint's public (no-login) access: its token, path and allowed browser origins, or null when it is not public. Requires canBuildWorkflows."
   endpointPublicAccess(processPublicId: String!): EndpointPublicAccessGql
 }
@@ -2796,6 +2823,9 @@ type WorkflowChat {
   lastEventSeq: Long!
   createdAt: String!
   updatedAt: String!
+  focusKind: ChatSubjectKind
+  focusId: Long
+  foldedIntoChatId: Long
 }
 
 type WorkflowChatMessage {
