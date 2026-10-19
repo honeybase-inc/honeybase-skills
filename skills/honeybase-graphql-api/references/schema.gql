@@ -324,6 +324,16 @@ type ActivityActor {
   viaName: String
 }
 
+type ActivityAssist {
+  kind: String!
+  model: String!
+  aiConnectionName: String
+  requestedByName: String
+  suggestedTier: String!
+  approvedTier: String!
+  matched: Boolean!
+}
+
 type ActivityChange {
   path: String!
   before: String
@@ -958,6 +968,7 @@ type AttributionActor {
   viaName: String
   at: String!
   links: [ActivityLink!]!
+  assist: ActivityAssist
 }
 
 type AuditAttribution {
@@ -1096,7 +1107,7 @@ type DashboardChartDetail {
   source: String!
   "JSON of the query: {\"kind\":\"sql\", \"sql\": \"... {{param}} ... [[AND ... {{param}}]]\", \"parameters\": [{name, type, required, default?}]}."
   query: String!
-  "JSON of the chart config (chart-viz.schema.json): {type, x?, y?, series?, xType?, timeGrain?, stacked?, horizontal?, sort?, limit?, yFormat?, title?, drill?}."
+  "JSON of the chart config (chart-viz.schema.json): {type, x?, y?, series?, xType?, timeGrain?, stacked?, horizontal?, sort?, limit?, yFormat?, title?, drill?, xAxis?, yAxis?, y2?, y2Axis?, legend?}; an axis is {show?, title?, min?, max?, scale?: linear|log|pow, exponent?}, a legend {show?, position?: top|bottom|left|right}."
   viz: String!
   version: Int!
   folderId: Long
@@ -1179,8 +1190,8 @@ type DashboardQueries {
   dashboardColumnValues("Source JSON, as dashboardSources returns it" source: String!, "Table or view as dashboardSourceSchema lists it (schema.table when it is not in the default schema)" table: String!, column: String!, "Values starting with this text (case-insensitive on Postgres); empty = any" prefix: String, "At most this many values, 1-50 (default 50)" limit: Int): String
   "Run a tile's chart with dashboard filter values mapped onto its parameters. Gate and database errors come back verbatim as the error message. Any member."
   runDashboardChart(dashboardPublicId: String!, "The tile's tileId" tileId: String!, "JSON object of dashboard filter values by filter id, e.g. {\"period\": {\"from\": \"2026-01-01\", \"to\": \"2026-02-01\"}}. A filter without a value falls back to its default; values only reach the chart through the tile's mappings." filterValues: String): DashboardQueryRun
-  "Run a chart on its default parameters (library card, chart editor). Any member."
-  runDashboardChartStandalone(chartPublicId: String!): DashboardQueryRun
+  "Run a chart outside a dashboard (library, chart page), on its defaults or on the given parameter values. Any member."
+  runDashboardChartStandalone(chartPublicId: String!, "JSON object of parameter values by the chart's parameter name, e.g. {\"period\": {\"from\": \"2026-01-01\", \"to\": \"2026-02-01\"}}. A parameter without a value falls back to its default; a name the chart does not declare is refused. Only a run on the defaults refreshes the chart's preview." values: String): DashboardQueryRun
   "Run ad-hoc SQL against a source (the chart editor). Returns the rows and a queryHandle that saveDashboardChart takes. Gate and database errors come back verbatim. Requires canManageDashboards."
   runDashboardAdhoc("Source JSON, as dashboardSources returns it" source: String!, "One SELECT. {{name}} binds a declared parameter; [[ ... {{name}} ... ]] is dropped when its parameters have no value (WHERE TRUE [[AND col = {{name}}]])." sql: String!, "JSON array of parameter declarations: [{name, type (text|number|date|date_range|multi_select), required?, default?}]" parameters: String, "JSON object of test values by parameter name" values: String): DashboardQueryRun
 }
@@ -1288,6 +1299,7 @@ type EntityActivity {
   origin: ActivityActor
   changes: [ActivityChange!]!
   truncated: Boolean!
+  assist: ActivityAssist
 }
 
 type EntityActivityPage {
@@ -1563,6 +1575,8 @@ type McpConnectionQueries {
   listMcpConnections: [McpConnectionSummary!]
   "Approved pinned MCP tool contracts for agent, workflow or integration authors; no URL, approval hash or approver identity"
   listMcpConnectionTools(integrationId: Long!): [McpToolContract!]
+  "Worst-case cost of suggesting tiers for up to 20 tools with an AI connection and model, for a run budget; makes no model call (requires canManageIntegrations)"
+  estimateMcpTierSuggestions(integrationId: Long!, toolNames: [String!]!, aiIntegrationId: Long!, model: String!): McpTierSuggestionEstimate
 }
 
 type McpConnectionSummary {
@@ -1599,6 +1613,7 @@ type McpConnectionTool {
   approvedAt: String
   lastSeenAt: String
   suggestion: McpTierSuggestion
+  approvalSuggestion: McpTierSuggestion
 }
 
 type McpTierSuggestion {
@@ -1608,6 +1623,21 @@ type McpTierSuggestion {
   aiIntegrationId: Long!
   model: String!
   generatedAt: String!
+  requestedBy: Long
+  costUsd: Float
+  costEstimated: Boolean
+}
+
+type McpTierSuggestionEstimate {
+  tools: [McpTierSuggestionToolEstimate!]!
+  priced: Boolean!
+  unit: String!
+  centsPerCredit: Int!
+}
+
+type McpTierSuggestionToolEstimate {
+  toolName: String!
+  maxCostUsd: Float
 }
 
 type McpToolContract {
