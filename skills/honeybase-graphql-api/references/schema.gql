@@ -7,6 +7,11 @@ scalar Long
 "A date-time with a time-zone in the ISO-8601 calendar system using the format 1970-01-01T00:00:00Z[UTC]"
 scalar ZonedDateTime
 
+enum BrowserModelMode {
+  Agent
+  Gateway
+}
+
 enum ChatPermissionMode {
   AllowAll
   AskPermission
@@ -27,6 +32,14 @@ enum ChatSubjectKind {
   TaskFeedback
   Thread
   Workflow
+}
+
+enum ConversationObjectKind {
+  Agent
+  App
+  Form
+  Process
+  Task
 }
 
 enum NotificationKind {
@@ -54,6 +67,12 @@ enum NotificationKind {
 enum RunDirection {
   Backward
   Forward
+}
+
+enum WebProvider {
+  Browserbase
+  Exa
+  Firecrawl
 }
 
 input ApiKeyScopesInput {
@@ -492,6 +511,7 @@ type AgentRequestPayload {
   questions: [String!]!
   context: String
   form: TaskForm
+  browser: BrowserApprovalDetails
 }
 
 type AgentRun {
@@ -683,6 +703,7 @@ type AgentToolRef {
   native: NativeToolRef
   mcp: McpToolRef
   policy: String!
+  builtinOptions: BuiltinWebOptions
 }
 
 type AgentUsage {
@@ -738,8 +759,12 @@ type AgentVersion {
 type AiChatMutations {
   "Create an AI copilot chat on a process"
   createChat(processId: Long, "Chat subject kind: workflow | agent | home" subjectKind: String, subjectId: Long, name: String!, "ChatSettings json (mode, maxToolCalls, integrationId, model, disabledIntegrationIds, disabledToolIds, disabledMcpToolIds)" settings: String, "Which surface opened this chat: direct | fix_with_barry | home. Metrics only - gates nothing." origin: String): WorkflowChat
-  "Open the signed-in member's Barry thread in this organization - their one conversation with Barry, reached from every page - creating it on first call. Their idle per-subject chats are folded into it first (copied in time order; the chats stay readable and stop taking messages)."
+  "Open the signed-in member's most recent Barry conversation in this organization, creating one when they have none. Their idle per-subject chats are adopted as conversations first (in place, with their history)."
   openBarryThread: WorkflowChat
+  "Start a new Barry conversation for the signed-in member, or return their existing empty one"
+  newBarryConversation: WorkflowChat
+  "Compact an overflowed conversation with its current model and automatically continue its stored user request. Preserves the full transcript."
+  compactChat(chatId: Long!): Boolean
   "Send a user message and start the copilot's turn (streams via watchChat)"
   sendChatMessage(chatId: Long!, content: String!, "Workflow chats: the current canvas graph — becomes the chat's working graph" workflowData: WorkflowDataGqlInput, "Agent chats: the builder form's AgentDraftSnapshot JSON — becomes the chat's working draft" agentDraft: String, "App chats: the editor's AppDraftSnapshot JSON — a MANIFEST of the draft (identity, content digest, paths and sizes), never file contents. App files live in app_file and Barry writes them through AppService directly, so there is no working copy to carry" appSnapshot: String, "Home chats: the HomeSnapshot JSON (the organization the chat is scoped to)" homeContext: String, "Task-feedback chats: the TaskFeedbackSnapshot JSON (the agent session the interview is about)" taskFeedbackContext: String, "The AI connection this turn runs on. Omit (with model) to keep the chat's current one, or -- on a chat that has none -- to run on the organization's default AI connection: the Honeybase AI credits connection, else its only enabled AI connection. That is how a member who cannot list connections still sends." integrationId: Long, "The model for this turn. Omit to keep the chat's current one, or to use the connection's default model." model: String, "Public ids of already-uploaded workflow files to attach to this message (pasted images). Ids only: the server rebuilds each reference from its own row, so a name, type or size claimed by the client is never believed. Capped per message and by total bytes; every attachment is replayed on each subsequent turn of the chat." files: [String!]!, "Barry threads only: the editor this message is sent from - workflow | agent | app | task_feedback - with focusId. Its snapshot rides in the matching argument above (workflowData, agentDraft, appSnapshot, taskFeedbackContext); with no focus, send homeContext." focusKind: String, "Barry threads only: the focused editor's subject id (process id, agent id, app id or agent session id)." focusId: Long, "Barry threads only: a SurfaceInput JSON saying where the user is ({page, objectKind?, objectId?, selection?, filters?}). Structure only: the server resolves every name under your own permissions and builds the note Barry reads from it." surface: String): Boolean
   "Stop the in-flight copilot turn"
@@ -767,6 +792,8 @@ type AiChatQueries {
   getChat(chatId: Long!, beforeSeq: Long, limit: Int): ChatDataGql
   "The signed-in user's standing approvals (\"Approve always\") in this organization: one row per tool key, with usage counters"
   approvalGrants: [ApprovalGrant!]
+  "The signed-in member's Barry conversations in this organization, most recently active first, each with the objects it touched (most recent first, at most 5; moreObjects counts the rest)"
+  barryConversations: [BarryConversation!]
 }
 
 type AiChatSubscriptions {
@@ -799,6 +826,7 @@ type AiModelInfo {
   supportsFunctionCalling: Boolean!
   inputCostPerToken: Float
   outputCostPerToken: Float
+  supportsStructuredOutput: Boolean
 }
 
 type ApiKeyEndpointScope {
@@ -1065,6 +1093,22 @@ type AvailabilityQueries {
   myWorkSummary: MyWorkSummary
 }
 
+type BarryConversation {
+  chat: WorkflowChat!
+  lastActivityAt: String!
+  objects: [ConversationObject!]!
+  moreObjects: Int!
+}
+
+type BrowserApprovalDetails {
+  provider: String!
+  payer: String!
+  model: String!
+  sessionId: String
+  expiresAtMillis: Long
+  sessionExpired: Boolean!
+}
+
 "A built-in agent tool: implemented server-side, no backing workflow. `enabled = false` means the server lacks the capability (web_search without an Exa API key)."
 type BuiltinToolGql {
   key: String!
@@ -1072,6 +1116,13 @@ type BuiltinToolGql {
   description: String!
   access: String!
   enabled: Boolean!
+}
+
+type BuiltinWebOptions {
+  provider: WebProvider
+  integrationId: Long
+  browserModel: BrowserModelMode!
+  browserModelId: String
 }
 
 type ChatDataGql {
@@ -1095,6 +1146,12 @@ type ChatSettings {
   disabledIntegrationIds: [Long!]!
   disabledToolIds: [Long!]!
   disabledMcpToolIds: [McpToolRef!]!
+}
+
+type ConversationObject {
+  kind: ConversationObjectKind!
+  publicId: String!
+  name: String!
 }
 
 type CreateProcessResultGql {
@@ -1128,7 +1185,7 @@ type DashboardChartDetail {
   source: String!
   "JSON of the query: {\"kind\":\"sql\", \"sql\": \"... {{param}} ... [[AND ... {{param}}]]\", \"parameters\": [{name, type, required, default?}]}."
   query: String!
-  "JSON of the chart config (chart-viz.schema.json): {type, x?, y?, series?, xType?, timeGrain?, stacked?, horizontal?, sort?, limit?, yFormat?, title?, drill?, xAxis?, yAxis?, y2?, y2Axis?, legend?}; an axis is {show?, title?, min?, max?, scale?: linear|log|pow, exponent?}, a legend {show?, position?: top|bottom|left|right}."
+  "JSON of the chart config (chart-viz.schema.json): {type, x?, y?, series?, xType?, timeGrain?, stacked?, horizontal?, sort?, limit?, yFormat?, title?, drill?, xAxis?, yAxis?, y2?, y2Axis?, legend?, colors?, thresholds?, tableRules?}; an axis is {show?, title?, min?, max?, scale?: linear|log|pow, exponent?}, a legend {show?, position?: top|bottom|left|right}; colors maps a series or slice to a colour; thresholds [{op, value, color}] colour a number (first match); tableRules [{scope: row|cell, column, op, value?, color}] tint a table (first match); op is gt|gte|lt|lte|eq|neq|contains|empty|not_empty and a colour is a theme name (chart-1..chart-5, red, amber, green, blue, gray) or #rrggbb."
   viz: String!
   version: Int!
   folderId: Long
@@ -1154,7 +1211,7 @@ type DashboardDetail {
   publicId: String!
   name: String!
   description: String!
-  "JSON array of the dashboard's filters: [{id, label, type (text|number|date|date_range|multi_select), default?, values?}]."
+  "JSON array of the dashboard's filters: [{id, label, type (text|number|date|date_range|multi_select), default?, values?, valuesFrom?}]. A text or multi_select filter's picker offers its static values, or with valuesFrom {source, table, column} that column's distinct values (dashboardFilterOptions)."
   filters: String!
   "Bumped on every update; updateDashboard takes it as expectedVersion and returns a conflict when it is stale."
   version: Int!
@@ -1165,13 +1222,26 @@ type DashboardDetail {
   updatedBy: Long
   createdAt: String!
   updatedAt: String!
+  "JSON of the dashboard's options: {autoApplyFilters} (default true: a filter value applies as soon as it is picked or typed, instead of waiting for Apply). Changed with the set_settings op."
+  settings: String!
+  "JSON array of the dashboard's notes — Markdown on the grid, not charts: [{noteId, x, y, w, h, markdown, align (left|center|right), verticalAlign (top|center|bottom), card (true: drawn on a card like a chart; false: straight on the page)}]. Changed with the set_note, move_note and remove_note ops. Markdown written by a builder: render it sanitized."
+  notes: String!
+}
+
+type DashboardFilterOptions {
+  "The picker's options: the filter's static values, or its valuesFrom column's distinct values (at most 200) as last refreshed. Customer data: render as text."
+  values: [String!]!
+  "When the column's values were last read; null for static values or before the first refresh"
+  refreshedAt: String
+  "True when the stored values were missing or stale and a refresh is running in the background; ask again later for the new ones"
+  refreshing: Boolean!
 }
 
 type DashboardMutations {
   "Create an empty dashboard. Requires canManageDashboards."
   createDashboard("Title, required" name: String!, "Description, required: it is what the list shows and what Barry reads first" description: String!, folderId: Long): DashboardDetail
   "Edit a dashboard with ops, applied in one transaction and validated as a whole. Requires canManageDashboards."
-  updateDashboard(publicId: String!, "JSON array of ops applied in order, each {\"op\": ...}: add_tile {chartPublicId, x, y, w, h, tileId?, titleOverride?}, remove_tile {tileId}, move_tile {tileId, x, y, w, h}, set_filter {filter}, remove_filter {filterId}, link_filter {tileId, filterId, param}, unlink_filter {tileId, filterId}, rename {name}, set_description {description}." ops: String!, "The version last read; a stale one returns outcome conflict" expectedVersion: Int!, "Validate the result and write nothing" validateOnly: Boolean): DashboardUpdateResult
+  updateDashboard(publicId: String!, "JSON array of ops applied in order, each {\"op\": ...}: add_tile {chartPublicId, x, y, w, h, tileId?, titleOverride?}, remove_tile {tileId}, move_tile {tileId, x, y, w, h}, set_filter {filter}, remove_filter {filterId}, link_filter {tileId, filterId, param}, unlink_filter {tileId, filterId}, rename {name}, set_description {description}, set_settings {settings: {autoApplyFilters}}, set_note {note: {noteId, x, y, w, h, markdown, align?, verticalAlign?, card?}} (add or replace), move_note {noteId, x, y, w, h}, remove_note {noteId}." ops: String!, "The version last read; a stale one returns outcome conflict" expectedVersion: Int!, "Validate the result and write nothing" validateOnly: Boolean): DashboardUpdateResult
   "Delete a dashboard and its tiles; its charts stay in the library. Requires canManageDashboards."
   deleteDashboard(publicId: String!): Boolean
   "Save the query a runDashboardAdhoc handle proved as a chart in the library. Requires canManageDashboards."
@@ -1209,6 +1279,8 @@ type DashboardQueries {
   dashboardSourceSchema("Source JSON, as dashboardSources returns it" source: String!): OrgDbSchema
   "Distinct values of one column, for filter value pickers; runs through the same gate and caps as any dashboard query. Returns a JSON array. Requires canManageDashboards."
   dashboardColumnValues("Source JSON, as dashboardSources returns it" source: String!, "Table or view as dashboardSourceSchema lists it (schema.table when it is not in the default schema)" table: String!, column: String!, "Values starting with this text (case-insensitive on Postgres); empty = any" prefix: String, "At most this many values, 1-50 (default 50)" limit: Int): String
+  "A dashboard filter's picker options, from a stored snapshot: reading them never queries the source. Values from a column are refreshed in the background when older than an hour. Any member."
+  dashboardFilterOptions(dashboardPublicId: String!, "A multi_select filter's id" filterId: String!): DashboardFilterOptions
   "Run a tile's chart with dashboard filter values mapped onto its parameters. Gate and database errors come back verbatim as the error message. Any member."
   runDashboardChart(dashboardPublicId: String!, "The tile's tileId" tileId: String!, "JSON object of dashboard filter values by filter id, e.g. {\"period\": {\"from\": \"2026-01-01\", \"to\": \"2026-02-01\"}}. A filter without a value falls back to its default; values only reach the chart through the tile's mappings." filterValues: String): DashboardQueryRun
   "Run a chart outside a dashboard (library, chart page), on its defaults or on the given parameter values. Any member."
@@ -1453,6 +1525,8 @@ type Integration {
 }
 
 type IntegrationMutations {
+  "Create or reuse a separate MCP connection using a saved Exa, Firecrawl or Browserbase integration key (requires canManageIntegrations). Tools still require administrator review and approval; future key changes are independent."
+  connectVendorMcp(integrationId: Long!): Integration
   "Create a new integration (requires canManageIntegrations permission)"
   createIntegration(integrationType: String!, name: String!, config: String!, secret: String!): Integration
   "Update an integration name, enabled and config (requires canManageIntegrations permission)"
