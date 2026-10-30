@@ -28,6 +28,8 @@ enum ChatStatus {
 enum ChatSubjectKind {
   Agent
   App
+  Chart
+  Dashboard
   Home
   TaskFeedback
   Thread
@@ -767,7 +769,7 @@ type AiChatMutations {
   "Compact an overflowed conversation with its current model and automatically continue its stored user request. Preserves the full transcript."
   compactChat(chatId: Long!): Boolean
   "Send a user message and start the copilot's turn (streams via watchChat)"
-  sendChatMessage(chatId: Long!, content: String!, "Workflow chats: the current canvas graph — becomes the chat's working graph" workflowData: WorkflowDataGqlInput, "Agent chats: the builder form's AgentDraftSnapshot JSON — becomes the chat's working draft" agentDraft: String, "App chats: the editor's AppDraftSnapshot JSON — a MANIFEST of the draft (identity, content digest, paths and sizes), never file contents. App files live in app_file and Barry writes them through AppService directly, so there is no working copy to carry" appSnapshot: String, "Home chats: the HomeSnapshot JSON (the organization the chat is scoped to)" homeContext: String, "Task-feedback chats: the TaskFeedbackSnapshot JSON (the agent session the interview is about)" taskFeedbackContext: String, "The AI connection this turn runs on. Omit (with model) to keep the chat's current one, or -- on a chat that has none -- to run on the organization's default AI connection: the Honeybase AI credits connection, else its only enabled AI connection. That is how a member who cannot list connections still sends." integrationId: Long, "The model for this turn. Omit to keep the chat's current one, or to use the connection's default model." model: String, "Public ids of already-uploaded workflow files to attach to this message (pasted images). Ids only: the server rebuilds each reference from its own row, so a name, type or size claimed by the client is never believed. Capped per message and by total bytes; every attachment is replayed on each subsequent turn of the chat." files: [String!]!, "Barry threads only: the editor this message is sent from - workflow | agent | app | task_feedback - with focusId. Its snapshot rides in the matching argument above (workflowData, agentDraft, appSnapshot, taskFeedbackContext); with no focus, send homeContext." focusKind: String, "Barry threads only: the focused editor's subject id (process id, agent id, app id or agent session id)." focusId: Long, "Barry threads only: a SurfaceInput JSON saying where the user is ({page, objectKind?, objectId?, selection?, filters?}). Structure only: the server resolves every name under your own permissions and builds the note Barry reads from it." surface: String): Boolean
+  sendChatMessage(chatId: Long!, content: String!, "Workflow chats: the current canvas graph — becomes the chat's working graph" workflowData: WorkflowDataGqlInput, "Agent chats: the builder form's AgentDraftSnapshot JSON — becomes the chat's working draft" agentDraft: String, "App chats: the editor's AppDraftSnapshot JSON — a MANIFEST of the draft (identity, content digest, paths and sizes), never file contents. App files live in app_file and Barry writes them through AppService directly, so there is no working copy to carry" appSnapshot: String, "Home chats: the HomeSnapshot JSON (the organization the chat is scoped to)" homeContext: String, "Task-feedback chats: the TaskFeedbackSnapshot JSON (the agent session the interview is about)" taskFeedbackContext: String, "Barry threads focused on a dashboard: the DashboardSnapshot JSON ({dashboardPublicId, version, editing, pendingOps})" dashboardSnapshot: String, "Barry threads focused on the chart editor: the ChartDraftSnapshot JSON (the editor's unsaved draft)" chartDraft: String, "The AI connection this turn runs on. Omit (with model) to keep the chat's current one, or -- on a chat that has none -- to run on the organization's default AI connection: the Honeybase AI credits connection, else its only enabled AI connection. That is how a member who cannot list connections still sends." integrationId: Long, "The model for this turn. Omit to keep the chat's current one, or to use the connection's default model." model: String, "Public ids of already-uploaded workflow files to attach to this message (pasted images). Ids only: the server rebuilds each reference from its own row, so a name, type or size claimed by the client is never believed. Capped per message and by total bytes; every attachment is replayed on each subsequent turn of the chat." files: [String!]!, "Barry threads only: the editor this message is sent from - workflow | agent | app | task_feedback | dashboard | chart - with focusId. Its snapshot rides in the matching argument above (workflowData, agentDraft, appSnapshot, taskFeedbackContext, dashboardSnapshot, chartDraft); with no focus, send homeContext." focusKind: String, "Barry threads only: the focused editor's subject id (process id, agent id, app id, agent session id, or the focusId of a dashboard or chart; 0 for a new chart)." focusId: Long, "Barry threads only: a SurfaceInput JSON saying where the user is ({page, objectKind?, objectId?, selection?, filters?}). Structure only: the server resolves every name under your own permissions and builds the note Barry reads from it." surface: String): Boolean
   "Stop the in-flight copilot turn"
   cancelChatTurn(chatId: Long!): Boolean
   "Approve or reject a pending tool call; with alwaysAllow, also grant it a standing approval"
@@ -1172,6 +1174,19 @@ type CreatedApiKey {
   plaintextKey: String!
 }
 
+"A per-organization note on a table or column of a dashboard source (what a value means), read by every member and by Barry."
+type DashboardAnnotationDetail {
+  "Source JSON, as dashboardSources returns it"
+  source: String!
+  "The table's qualified name (schema.table, or bare in the default schema)"
+  table: String!
+  "The column; null when the note is about the table"
+  column: String
+  description: String!
+  updatedBy: Long
+  updatedAt: String!
+}
+
 type DashboardChartDeleteResult {
   deleted: Boolean!
   "When not deleted: the dashboards whose tiles use the chart. Remove those tiles first."
@@ -1198,6 +1213,8 @@ type DashboardChartDetail {
   updatedBy: Long
   createdAt: String!
   updatedAt: String!
+  "The id a Barry message names this chart by when the chart editor is the turn's focus (sendChatMessage focusKind chart, focusId)."
+  focusId: Long!
 }
 
 type DashboardChartUpdateResult {
@@ -1227,6 +1244,8 @@ type DashboardDetail {
   settings: String!
   "JSON array of the dashboard's notes — Markdown on the grid, not charts: [{noteId, x, y, w, h, markdown, align (left|center|right), verticalAlign (top|center|bottom), card (true: drawn on a card like a chart; false: straight on the page)}]. Changed with the set_note, move_note and remove_note ops. Markdown written by a builder: render it sanitized."
   notes: String!
+  "The id a Barry message names this dashboard by when it is the turn's focus (sendChatMessage focusKind dashboard, focusId)."
+  focusId: Long!
 }
 
 type DashboardFilterOptions {
@@ -1263,6 +1282,8 @@ type DashboardMutations {
   assignDashboardChartTag(publicId: String!, tagId: Long!): Boolean
   "Untag a chart. Requires canManageDashboards."
   unassignDashboardChartTag(publicId: String!, tagId: Long!): Boolean
+  "Write (or, with an empty description, remove) the note on a table or column of a source. Returns the annotation, null when removed. Requires canManageDashboards."
+  setDashboardAnnotation("Source JSON, as dashboardSources returns it" source: String!, "The table (schema.table or its name)" table: String!, "The column; omit for a note on the table" column: String, "The note, at most 1000 characters; empty removes the annotation" description: String!): DashboardAnnotationDetail
 }
 
 type DashboardQueries {
@@ -1288,6 +1309,8 @@ type DashboardQueries {
   runDashboardChartStandalone(chartPublicId: String!, "JSON object of parameter values by the chart's parameter name, e.g. {\"period\": {\"from\": \"2026-01-01\", \"to\": \"2026-02-01\"}}. A parameter without a value falls back to its default; a name the chart does not declare is refused. Only a run on the defaults refreshes the chart's preview." values: String): DashboardQueryRun
   "Run ad-hoc SQL against a source (the chart editor). Returns the rows and a queryHandle that saveDashboardChart takes. Gate and database errors come back verbatim. Requires canManageDashboards."
   runDashboardAdhoc("Source JSON, as dashboardSources returns it" source: String!, "One SELECT. {{name}} binds a declared parameter; [[ ... {{name}} ... ]] is dropped when its parameters have no value (WHERE TRUE [[AND col = {{name}}]])." sql: String!, "JSON array of parameter declarations: [{name, type (text|number|date|date_range|multi_select), required?, default?}]" parameters: String, "JSON object of test values by parameter name" values: String): DashboardQueryRun
+  "Every schema annotation of the organization: notes on tables and columns of its sources. Any member."
+  dashboardAnnotations: [DashboardAnnotationDetail!]
 }
 
 type DashboardQueryColumn {
