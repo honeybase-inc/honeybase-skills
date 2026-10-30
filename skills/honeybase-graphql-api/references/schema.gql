@@ -198,6 +198,7 @@ input PermissionsInput {
   canManageApiKeys: Boolean
   canCreateApiKeys: Boolean
   canManageDashboards: Boolean
+  canManageBilling: Boolean
 }
 
 input ProcessSettingsInput {
@@ -2111,6 +2112,7 @@ type Permissions {
   canManageApiKeys: Boolean
   canCreateApiKeys: Boolean
   canManageDashboards: Boolean
+  canManageBilling: Boolean
 }
 
 type ProcessAcceptance {
