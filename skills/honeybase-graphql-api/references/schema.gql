@@ -449,6 +449,8 @@ type AgentMutations {
   releaseAgent(agentId: Long!): AgentData
   "Pause/unpause an agent (paused agents refuse runs)"
   setAgentPaused(agentId: Long!, paused: Boolean!): Agent
+  "Turn the draft's \"Upload to any site without asking\" waiver on or off for web_interact uploads. Turning it on is refused for API keys and AI copilots: only a signed-in person in the app can accept it, and the server records who and when. Applies at the next release, like every draft setting."
+  setAgentUploadAnySite(agentId: Long!, enabled: Boolean!): AgentData
   "Allow apps that declare this agent to invoke it. Requires canManageAgents AND canManageReleases, and a released version: agent tools run with the agent's authority, so this hands that authority to every user of every app that declares it"
   setAgentAppInvocable(agentId: Long!, appInvocable: Boolean!): Agent
   "Delete an agent, its versions, sessions and run history"
@@ -464,7 +466,7 @@ type AgentMutations {
   "Send a test-chat message: runs the DRAFT version (streams via watchAgentRun)"
   startTestChatTurn(agentId: Long!, content: String!): TestChatTurn
   "Approve / reject-with-message / edit-args-then-approve a pending tool call"
-  respondToAgentToolCall(agentRunId: Long!, toolCallId: String!, approved: Boolean!, "Shown to the model on rejection so it adapts" message: String, "Edited arguments JSON (edit-args-then-approve)" editedArgs: String): Boolean
+  respondToAgentToolCall(agentRunId: Long!, toolCallId: String!, approved: Boolean!, "Shown to the model on rejection so it adapts" message: String, "Edited arguments JSON (edit-args-then-approve)" editedArgs: String, "Upload approvals only: also add the card's destination site to the agent's upload sites (draft and live release), so later uploads there run under the tool's normal policy. Requires agent-management permission; ignored on rejections." allowUploadSite: Boolean): Boolean
   "Stop an in-flight agent run"
   cancelAgentRun(agentRunId: Long!): Boolean
   "Close the caller's test session; the next turn starts fresh"
@@ -505,6 +507,7 @@ type AgentRequestAnswer {
   text: String
   editedArguments: String
   formData: String
+  allowUploadSite: Boolean
 }
 
 type AgentRequestPayload {
@@ -662,6 +665,8 @@ type AgentSettings {
   taskModeCeiling: String!
   taskDefaults: AgentTaskBudget!
   fallbackAssignee: Long
+  uploadSites: [String!]!
+  uploadAnySite: UploadAnySiteWaiver
 }
 
 type AgentSubscriptions {
@@ -830,6 +835,7 @@ type AiModelInfo {
   inputCostPerToken: Float
   outputCostPerToken: Float
   supportsStructuredOutput: Boolean
+  supportsVision: Boolean
 }
 
 type ApiKeyEndpointScope {
@@ -1110,6 +1116,7 @@ type BrowserApprovalDetails {
   sessionId: String
   expiresAtMillis: Long
   sessionExpired: Boolean!
+  upload: UploadApprovalDetails
 }
 
 "A built-in agent tool: implemented server-side, no backing workflow. `enabled = false` means the server lacks the capability (web_search without an Exa API key)."
@@ -2576,7 +2583,7 @@ type TaskMutations {
   "Start the agent already on a task now: a scheduled start happens immediately, a waiting agent is woken, and a stopped, handed-back, failed or finished one opens a fresh session on the same budget. Fails while the agent is working or waiting on a person."
   startTaskAgent(taskId: Long!): WorkflowTask
   "Answer the agent's pending request on a task: approve, reject with a message, approve with edited arguments, or reply to its question. Answering wakes the agent. Only the request's target (or an agent administrator) may answer."
-  answerAgentRequest(agentSessionRequestId: Long!, "Approval only: true to approve, false to reject. Ignored for a question." approved: Boolean, "The answer to a question, or the reason for rejecting a tool call (the agent sees it and adapts)." text: String, "Approval only: arguments edited before approving, re-validated against the tool's schema." editedArguments: String, "Form-backed question only: the SurveyJS answers JSON, validated against the form frozen onto the request. Required when the request carries a form; ignored otherwise." formData: String): AgentSessionRequest
+  answerAgentRequest(agentSessionRequestId: Long!, "Approval only: true to approve, false to reject. Ignored for a question." approved: Boolean, "The answer to a question, or the reason for rejecting a tool call (the agent sees it and adapts)." text: String, "Approval only: arguments edited before approving, re-validated against the tool's schema." editedArguments: String, "Form-backed question only: the SurveyJS answers JSON, validated against the form frozen onto the request. Required when the request carries a form; ignored otherwise." formData: String, "Upload approvals only: also add the card's destination site to the agent's upload sites. Requires agent-management permission." allowUploadSite: Boolean): AgentSessionRequest
   "Approve the plan a Plan-then-execute agent proposed, starting a fresh autonomous session that carries it out, or send the plan back with a message for the agent to re-plan."
   decideAgentPlan(taskId: Long!, approved: Boolean!, "When rejecting: what to change. The agent re-plans with this in context, and it counts as a wake-up." message: String): WorkflowTask
   "Rate an agent's finished work on a task (Worked / Partly / Wrong) with a comment. Offered on finished sessions only; the task's owner, their team or an agent administrator may rate. Re-rating overwrites. Returns the refreshed Agent tab view."
@@ -2808,6 +2815,24 @@ type ToolQueries {
   getTool(toolId: Long, publicId: String): ToolData
   "Evaluate an output selection against the tool process's most recent completed run (None = no completed run yet)"
   previewToolOutput(toolId: Long!, "ToolOutputSelection JSON to preview; omitted = the tool's saved selection" outputSelection: String): String
+}
+
+type UploadAnySiteWaiver {
+  acceptedBy: Long!
+  acceptedAt: String!
+}
+
+type UploadApprovalDetails {
+  files: [UploadApprovalFile!]!
+  site: String!
+  provider: String!
+  notInUploadSites: Boolean!
+  firstUploadToSite: Boolean!
+}
+
+type UploadApprovalFile {
+  name: String!
+  sizeBytes: Long!
 }
 
 type UserAvailability {
