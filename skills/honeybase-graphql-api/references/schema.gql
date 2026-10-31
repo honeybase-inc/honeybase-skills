@@ -802,6 +802,8 @@ type AiChatQueries {
   approvalGrants: [ApprovalGrant!]
   "The signed-in member's Barry conversations in this organization, most recently active first, each with the objects it touched (most recent first, at most 5; moreObjects counts the rest)"
   barryConversations: [BarryConversation!]
+  "The AI connection and model a Barry message with none selected runs on, as the server resolves them: the organization's credits connection, else its only enabled AI connection, with the connection's default model or the product default. Null when the organization has several connections and no credits one (a real choice). Never credentials."
+  barryComposerDefault: BarryComposerDefault
 }
 
 type AiChatSubscriptions {
@@ -1100,6 +1102,12 @@ type AvailabilityQueries {
   availabilityIntervals(webUserIds: [Long!]!, from: String!, to: String!, timezone: String!): [UserAvailabilityIntervals!]
   "The signed-in user's own at-a-glance state for the header chips: global switch, how many processes they are accepting out of the org total, and how many pending tasks are assigned to them. Cheap enough to refresh often; use availabilitySummaries for the full per-process panel."
   myWorkSummary: MyWorkSummary
+}
+
+type BarryComposerDefault {
+  integrationId: Long!
+  integrationName: String!
+  model: String!
 }
 
 type BarryConversation {
@@ -2168,7 +2176,7 @@ type ProcessData {
 
 type ProcessMutations {
   "Create a new process with a default workflow"
-  createProcess(name: String!, description: String!, kind: String, timeoutMs: Long): CreateProcessResultGql
+  createProcess(name: String!, description: String!, kind: String, timeoutMs: Long, "The trigger the first draft starts with: schedule, webhook, form or manual (the webhook scaffold, which is what a manual run starts from). Omitted = webhook. Standard processes only; an endpoint keeps its own scaffold. Nothing is activated until a release." triggerKind: String): CreateProcessResultGql
   "Create a new workflow in a process, optionally duplicating an existing workflow"
   createWorkflow(processId: Long!, name: String!, description: String, duplicateWorkflowId: Long): WorkflowDataGql
   "Save changes to a workflow's nodes and edges"
