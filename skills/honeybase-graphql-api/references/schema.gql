@@ -1117,6 +1117,11 @@ type BarryConversation {
   moreObjects: Int!
 }
 
+type BillingQueries {
+  "This organization's plan: kind, status, effective limits and price. Any member may read it; `seatsUsed`, the period and the source are null unless the caller is an Owner or Admin."
+  organizationPlan: OrganizationPlan
+}
+
 type BrowserApprovalDetails {
   provider: String!
   payer: String!
@@ -2081,6 +2086,18 @@ type OrganizationMutations {
   renameOrganization(name: String!): Boolean
 }
 
+type OrganizationPlan {
+  kind: String!
+  status: String!
+  suspensionReason: String
+  limits: PlanLimits!
+  priceCents: Int
+  source: String
+  currentPeriodStart: ZonedDateTime
+  currentPeriodEnd: ZonedDateTime
+  seatsUsed: Int
+}
+
 type OrganizationQueries {
   "List of organizations the current user can switch to"
   switchableOrganizations: [Organization!]
@@ -2151,6 +2168,14 @@ type Permissions {
   canCreateApiKeys: Boolean
   canManageDashboards: Boolean
   canManageBilling: Boolean
+}
+
+type PlanLimits {
+  builderSeats: Int
+  retentionDays: Int
+  monthlyRuns: Long
+  monthlyCredits: Long
+  rolloverMultiple: Int!
 }
 
 type ProcessAcceptance {
@@ -2304,6 +2329,8 @@ type Queries {
   dashboards: DashboardQueries!
   "Honeybase AI credits queries"
   aiCredits: AiCreditsQueries!
+  "Billing queries: the organization's plan"
+  billing: BillingQueries!
   "Job schedule queries"
   schedules: ScheduleQueries!
   "Availability (control panel) queries"
