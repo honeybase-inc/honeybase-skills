@@ -825,6 +825,8 @@ type AiCreditsQueries {
   balance: AiCreditsBalance
   "Whether Honeybase AI credits are enabled on this deployment (the feature flag, not this organization's grant)."
   enabled: Boolean
+  "The model an agent run or an AI workflow step on the Honeybase AI credits connection uses when it names none. Barry keeps the connection's own default model."
+  agentModel: String
 }
 
 type AiModelInfo {
