@@ -2134,7 +2134,7 @@ type OrganizationPlan {
 type OrganizationQueries {
   "List of organizations the current user can switch to"
   switchableOrganizations: [Organization!]
-  "The organization's web defaults: the provider and payer each web tool uses for Barry, and what an agent's web tool starts with when it is first added. Readable by any member; holds no credentials."
+  "The organization's web defaults: the provider and payer each web tool uses for Barry, and what an agent's web tool starts with when it is first added. Readable by any authenticated caller of the organization, API keys included; holds providers and connection ids, never a credential."
   webDefaults: OrganizationWebDefaults
 }
 
