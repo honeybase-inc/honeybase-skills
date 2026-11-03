@@ -1124,6 +1124,23 @@ type BillingQueries {
   organizationPlan: OrganizationPlan
 }
 
+type BillingRunMeter {
+  periodStart: ZonedDateTime!
+  periodEnd: ZonedDateTime!
+  used: Long!
+  included: Long
+  purchasedRemaining: Long!
+  allowance: Long
+}
+
+type BillingSeatMember {
+  webUserId: Long!
+  name: String!
+  email: String!
+  role: String!
+  isExternal: Boolean!
+}
+
 type BrowserApprovalDetails {
   provider: String!
   payer: String!
@@ -2003,6 +2020,7 @@ type OrgDatabase {
   integrationId: Long
   createdAt: String!
   updatedAt: String!
+  reclaimedAt: String
 }
 
 type OrgDatabaseCredential {
@@ -2098,6 +2116,11 @@ type OrganizationPlan {
   currentPeriodStart: ZonedDateTime
   currentPeriodEnd: ZonedDateTime
   seatsUsed: Int
+  executionAllowed: Boolean!
+  seatsOverLimit: Boolean!
+  countedMembers: [BillingSeatMember!]
+  runMeter: BillingRunMeter
+  trialExpiryEnforced: Boolean!
 }
 
 type OrganizationQueries {
@@ -2465,6 +2488,7 @@ type RunSummary {
   durationMillis: Long
   isTest: Boolean!
   testOrigin: String
+  skipReason: String
 }
 
 type RunWorkflow {
@@ -2474,6 +2498,7 @@ type RunWorkflow {
   direction: RunDirection!
   customPayload: String
   webhookEventId: Long
+  skipReason: String
 }
 
 type RunWorkflowDataGql {
