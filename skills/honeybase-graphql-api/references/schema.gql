@@ -283,6 +283,12 @@ input TaskViewSortInput {
   descending: Boolean!
 }
 
+input WebToolDefaultInput {
+  provider: WebProvider
+  integrationId: Long
+  browserModel: BrowserModelMode
+}
+
 input WorkflowDataGqlInput {
   workflow: WorkflowInput!
   nodes: [NodeGqlInput!]!
@@ -2104,6 +2110,8 @@ type OrganizationMutations {
   transferOwnership(targetWebUserId: Long!): Boolean
   "Rename the current organization. Requires Owner or Admin role."
   renameOrganization(name: String!): Boolean
+  "Set the organization's web defaults (all three entries; null = the Honeybase default). Requires Owner or Admin role. Each entry is checked: a provider the tool supports, and a connection of this organization, of the provider's type, enabled and with a key. Existing agents keep their saved tool settings."
+  setWebDefaults(search: WebToolDefaultInput, fetch: WebToolDefaultInput, interact: WebToolDefaultInput): OrganizationWebDefaults
 }
 
 type OrganizationPlan {
@@ -2126,6 +2134,17 @@ type OrganizationPlan {
 type OrganizationQueries {
   "List of organizations the current user can switch to"
   switchableOrganizations: [Organization!]
+  "The organization's web defaults: the provider and payer each web tool uses for Barry, and what an agent's web tool starts with when it is first added. Readable by any member; holds no credentials."
+  webDefaults: OrganizationWebDefaults
+}
+
+"Organization web defaults. A null entry means that tool's Honeybase default: Exa search, Firecrawl fetch, Browserbase interaction, all paid by Honeybase."
+type OrganizationWebDefaults {
+  search: WebToolDefault
+  fetch: WebToolDefault
+  interact: WebToolDefault
+  "Whether the caller may change them (Owner or Admin role)"
+  canEdit: Boolean!
 }
 
 type OrganizeMutations {
@@ -2963,6 +2982,12 @@ type UserQueries {
   "What removing an external member's access would do, so the confirmation dialog can state it (requires canManageUsers permission)"
   planRemoveAccess(webUserId: Long!): RemoveAccessPlan
   planDeactivation(webUserId: Long!): MemberDeactivationPlan
+}
+
+type WebToolDefault {
+  provider: WebProvider
+  integrationId: Long
+  browserModel: BrowserModelMode
 }
 
 type Webhook {
