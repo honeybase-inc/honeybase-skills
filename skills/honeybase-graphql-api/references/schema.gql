@@ -846,6 +846,9 @@ type AiModelInfo {
   outputCostPerToken: Float
   supportsStructuredOutput: Boolean
   supportsVision: Boolean
+  recommended: Boolean
+  creditsPerMillionInput: Float
+  creditsPerMillionOutput: Float
 }
 
 type ApiKeyEndpointScope {
@@ -1125,9 +1128,55 @@ type BarryConversation {
   moreObjects: Int!
 }
 
+type BillingActivity {
+  at: ZonedDateTime!
+  kind: String!
+  runs: Long
+  credits: Long
+  planKind: String
+  effectiveAt: ZonedDateTime
+}
+
+type BillingCheckoutReturn {
+  purpose: String!
+  planKind: String
+  quantity: Long!
+  fulfilled: Boolean!
+}
+
+type BillingCreditsAdded {
+  included: Long!
+  purchased: Long!
+}
+
+type BillingMutations {
+  "Open hosted USD Checkout for a configured paid plan. Requires canManageBilling, Stripe provider and a non-Internal plan; existing subscribers use the portal. No entitlements are granted on return."
+  startCheckout(planKind: String!): String
+  "Open the configured Stripe billing portal for this organization. Requires canManageBilling and Stripe provider; Internal plans are excluded."
+  openBillingPortal: String
+  "Buy a configured Runs pack by its quantity. Requires canManageBilling; fulfillment follows a verified paid webhook."
+  buyRuns(pack: Long!): String
+  "Buy a configured Credits pack by its quantity. Requires canManageBilling; fulfillment follows a verified paid webhook."
+  buyCredits(pack: Long!): String
+}
+
+type BillingPack {
+  quantity: Long!
+  priceCents: Int!
+}
+
+type BillingPlanOffer {
+  kind: String!
+  priceCents: Int!
+}
+
 type BillingQueries {
   "This organization's plan: kind, status, effective limits and price. Any member may read it; `seatsUsed`, the period and the source are null unless the caller is an Owner or Admin."
   organizationPlan: OrganizationPlan
+  "Recent billing activity, newest first: monthly period grants, Runs and Credits purchases, credit grants, and subscription changes (cancellation scheduled or withdrawn, payment failed, suspended for payment, recovered, ended, plan changed). `kind` is one of period_started, runs_purchased, credits_purchased, credits_granted, cancel_scheduled, cancel_withdrawn, ended, suspended, payment_failed, recovered, plan_changed; more kinds may be added. `limit` defaults to 10 (max 50). Requires canManageBilling."
+  activity(limit: Int): [BillingActivity!]
+  "What a return from hosted Checkout bought and whether it has been fulfilled (a pack once its grant is written, a plan once its first invoice is paid). Null for a session that is unknown or belongs to another organization. Requires canManageBilling."
+  checkoutReturn(sessionId: String!): BillingCheckoutReturn
 }
 
 type BillingRunMeter {
@@ -1194,6 +1243,13 @@ type ChatSettings {
   disabledIntegrationIds: [Long!]!
   disabledToolIds: [Long!]!
   disabledMcpToolIds: [McpToolRef!]!
+}
+
+type ConnectionProbe {
+  ok: Boolean!
+  error: String
+  reportedVersion: String
+  suggestedEngine: String
 }
 
 type ConversationObject {
@@ -1335,7 +1391,7 @@ type DashboardQueries {
   "The organization's dashboards, by name, with their tiles and filters. Any member."
   dashboards("Only dashboards in this folder" folderId: Long, "Only dashboards carrying every one of these tags" tagIds: [Long!]): [DashboardDetail!]
   "One dashboard by public id. Any member."
-  dashboard(publicId: String!): DashboardDetail
+  dashboard(publicId: String!, "True when a person is opening the dashboard (the app sets it on open, not on a re-read): counts one view, which ranks the dashboard for the server's cache warm-up." view: Boolean): DashboardDetail
   "The charts library, by name, each with its preview snapshot. Any member."
   dashboardCharts("Only charts in this folder" folderId: Long, "Only charts carrying every one of these tags" tagIds: [Long!], "Only charts on this source (source JSON, as dashboardSources returns it)" source: String): [DashboardChartDetail!]
   "One chart by public id, including its SQL. Any member."
@@ -1349,9 +1405,9 @@ type DashboardQueries {
   "A dashboard filter's picker options, from a stored snapshot: reading them never queries the source. Values from a column are refreshed in the background when older than an hour. Any member."
   dashboardFilterOptions(dashboardPublicId: String!, "A multi_select filter's id" filterId: String!): DashboardFilterOptions
   "Run a tile's chart with dashboard filter values mapped onto its parameters. Gate and database errors come back verbatim as the error message. Any member."
-  runDashboardChart(dashboardPublicId: String!, "The tile's tileId" tileId: String!, "JSON object of dashboard filter values by filter id, e.g. {\"period\": {\"from\": \"2026-01-01\", \"to\": \"2026-02-01\"}}. A filter without a value falls back to its default; values only reach the chart through the tile's mappings." filterValues: String): DashboardQueryRun
+  runDashboardChart(dashboardPublicId: String!, "The tile's tileId" tileId: String!, "JSON object of dashboard filter values by filter id, e.g. {\"period\": {\"from\": \"2026-01-01\", \"to\": \"2026-02-01\"}}. A filter without a value falls back to its default; values only reach the chart through the tile's mappings." filterValues: String, "Server frame cache policy: default (serve a cached result within its TTL, store a fresh one), refresh (skip the cache, store the fresh result for everyone), or bypass (neither). Absent = bypass, so an existing client always gets a live run; the app's dashboards send default." cache: String): DashboardQueryRun
   "Run a chart outside a dashboard (library, chart page), on its defaults or on the given parameter values. Any member."
-  runDashboardChartStandalone(chartPublicId: String!, "JSON object of parameter values by the chart's parameter name, e.g. {\"period\": {\"from\": \"2026-01-01\", \"to\": \"2026-02-01\"}}. A parameter without a value falls back to its default; a name the chart does not declare is refused. Only a run on the defaults refreshes the chart's preview." values: String): DashboardQueryRun
+  runDashboardChartStandalone(chartPublicId: String!, "JSON object of parameter values by the chart's parameter name, e.g. {\"period\": {\"from\": \"2026-01-01\", \"to\": \"2026-02-01\"}}. A parameter without a value falls back to its default; a name the chart does not declare is refused. Only a run on the defaults refreshes the chart's preview." values: String, "Server frame cache policy: default (serve a cached result within its TTL, store a fresh one), refresh (skip the cache, store the fresh result for everyone), or bypass (neither). Absent = bypass, so an existing client always gets a live run; the app's dashboards send default." cache: String): DashboardQueryRun
   "Run ad-hoc SQL against a source (the chart editor). Returns the rows and a queryHandle that saveDashboardChart takes. Gate and database errors come back verbatim. Requires canManageDashboards."
   runDashboardAdhoc("Source JSON, as dashboardSources returns it" source: String!, "One SELECT. {{name}} binds a declared parameter; [[ ... {{name}} ... ]] is dropped when its parameters have no value (WHERE TRUE [[AND col = {{name}}]])." sql: String!, "JSON array of parameter declarations: [{name, type (text|number|date|date_range|multi_select), required?, default?}]" parameters: String, "JSON object of test values by parameter name" values: String): DashboardQueryRun
   "Every schema annotation of the organization: notes on tables and columns of its sources. Any member."
@@ -1373,6 +1429,10 @@ type DashboardQueryRun {
   elapsedMs: Long!
   "runDashboardAdhoc only: the proof this query ran (valid 24 h). saveDashboardChart / updateDashboardChart take it, and save the handle's SQL, parameters and source — never SQL from the client."
   queryHandle: String
+  "When the source answered (ISO-8601 UTC). Earlier than now when the result came from the server's frame cache (cache: default)."
+  computedAt: String
+  "True when this cached result outlived its cache TTL and is served while another request recomputes it; ask again, or run with cache: refresh."
+  stale: Boolean!
 }
 
 type DashboardRef {
@@ -1606,6 +1666,10 @@ type IntegrationMutations {
   deleteIntegration(integrationId: Long!): Boolean
   "Test a database connection with the given parameters"
   testConnection(integrationType: String!, config: String!, secret: String, integrationId: Long): String
+  "Test a connection like testConnection and, for a SQL type, also ask the server which engine it is: ok/error, the version string it reported, and suggestedEngine when that string names an engine other than integrationType (Amazon Redshift behind a PostgreSQL connection, MariaDB behind a MySQL one). A suggestion only; nothing switches (requires canManageIntegrations permission)"
+  probeConnection(integrationType: String!, config: String!, secret: String, integrationId: Long): ConnectionProbe
+  "Re-type a saved SQL connection to another SQL engine (Postgres, Redshift, MySQL, MariaDB, OracleDB). Changes the engine column only: the connection settings and the stored secret stay, nodes and agent tools that reference the connection keep working, pools are rebuilt. Refused for non-SQL connections and system-owned ones (requires canManageIntegrations permission)"
+  setIntegrationEngine(integrationId: Long!, engine: String!): Integration
   "Execute the Access Token exchange request and return the redacted request/response with token-found indicators as JSON"
   testAccessToken(secret: String!, integrationId: Long): String
   "Execute the OAuth Client Credentials token request and return the redacted request/response with token-found indicator as JSON"
@@ -1841,6 +1905,8 @@ type MetadataBadge {
 }
 
 type Mutations {
+  "Self-service Stripe test billing (canManageBilling)"
+  billing: BillingMutations!
   "Authentication mutations (login, token refresh)"
   auth: AuthMutations!
   "User management mutations"
@@ -2129,6 +2195,13 @@ type OrganizationPlan {
   countedMembers: [BillingSeatMember!]
   runMeter: BillingRunMeter
   trialExpiryEnforced: Boolean!
+  provider: String!
+  checkoutAvailable: Boolean!
+  planOffers: [BillingPlanOffer!]!
+  runPacks: [BillingPack!]!
+  creditPacks: [BillingPack!]!
+  cancelAt: ZonedDateTime
+  creditsAdded: BillingCreditsAdded
 }
 
 type OrganizationQueries {
