@@ -2392,6 +2392,8 @@ type ProcessQueries {
   actionAuthorization(publicId: String!): ActionAuthorizationPreview
   "An endpoint's public (no-login) access: its token, path and allowed browser origins, or null when it is not public. Requires canBuildWorkflows."
   endpointPublicAccess(processPublicId: String!): EndpointPublicAccessGql
+  "The vendor-side state of each Web Monitor trigger of a process's current release: pending, active, paused or error (with the reason). Empty when the process has none."
+  webMonitorStatuses(processId: Long!): [WebMonitorStatus!]
 }
 
 type ProcessSettings {
@@ -3055,6 +3057,16 @@ type UserQueries {
   "What removing an external member's access would do, so the confirmation dialog can state it (requires canManageUsers permission)"
   planRemoveAccess(webUserId: Long!): RemoveAccessPlan
   planDeactivation(webUserId: Long!): MemberDeactivationPlan
+}
+
+type WebMonitorStatus {
+  nodeName: String!
+  state: String!
+  provider: String!
+  payer: String!
+  lastError: String
+  lastCheckAt: String
+  lastSyncedAt: String
 }
 
 type WebToolDefault {
