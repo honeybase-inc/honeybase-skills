@@ -1,7 +1,7 @@
 ---
 name: honeybase-graphql-api
 description: Use the Honeybase GraphQL API with an organization API key (hbk_...) — tasks, processes/workflows, runs, teams, schedules, availability, agents. Honeybase is a workflow-automation platform with no public documentation; AI models are not trained on it, so ALWAYS load this skill before writing any query, mutation or integration against a Honeybase server. Includes the full GraphQL schema as a greppable reference.
-version: 2026-11-05
+version: 2026-11-06
 ---
 
 # Honeybase GraphQL API
@@ -53,6 +53,25 @@ Conventions:
 - **Dates**: `LocalDate` = `"2026-07-31"`, `ZonedDateTime` = ISO-8601 (`"2026-07-31T12:00:00Z"`). Entity timestamps come back as ISO-8601 strings.
 - **`JsonString` fields** (e.g. task `metadata`, integration configs) are JSON **encoded as a string** — double-escape when sending, parse after reading.
 - **Permissions**: every operation's docstring in the SDL ends with what it requires (`Requires canManageTasks.`, `Requires Owner or Admin role.`). The key only has the flags granted at creation; grep the docstring before calling and don't retry a `PERMISSION_DENIED`.
+
+## Future process runs
+
+`processes.scheduleProcessRun(input: ...)` accepts numeric `processId`, offset-bearing
+ISO `runAt`, optional `triggerNodeName`, JSON-encoded `payload` and replacement `key`.
+Requires `canBuildWorkflows` (and `graphql` scope for keys). Time must be more than
+one minute ahead, within the configured horizon (default two years); payload is
+capped at 65536 UTF-8 bytes. A repeated key moves the pending schedule, retaining
+its public UUID. List with `processes.scheduledRuns(processId:, status:, from:, to:,
+first:, after:)`: ascending time, inclusive from/exclusive to, page size 50/max 100.
+`processes.scheduledRun(id:)` reads one public UUID; alternatively use
+`runWorkflowId:` to find the schedule behind a run. `cancelScheduledRun(id:)` affects
+only pending schedules (repeating a completed cancellation is safe).
+
+Scheduling returns a pending record, not a started run. Execution uses the latest
+release and rechecks the creator/key's authority when due. Paused processes and
+exhausted run allowances are skipped. Failed or interrupted starts are not retried.
+
+Scheduled-run replacement keys are limited to 200 characters. Scheduled payloads are visible only to their creator or callers with run-history permission. MCP confirmation shows the replacement key and the existing pending run’s time and creator before replacing it.
 
 ## Errors
 

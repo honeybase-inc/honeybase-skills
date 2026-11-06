@@ -224,6 +224,14 @@ input RunNodeGqlInput {
   usage: String
 }
 
+input ScheduleProcessRunInput {
+  processId: Long!
+  runAt: String!
+  triggerNodeName: String
+  payload: String
+  key: String
+}
+
 input TaskAssignmentInput {
   userId: Long
   teamId: Long
@@ -1854,6 +1862,7 @@ type McpTierSuggestion {
   requestedBy: Long
   costUsd: Float
   costEstimated: Boolean
+  source: String
 }
 
 type McpTierSuggestionEstimate {
@@ -2128,6 +2137,7 @@ type OrgDbColumn {
   name: String!
   dataType: String!
   nullable: Boolean!
+  comment: String
 }
 
 type OrgDbSchema {
@@ -2141,6 +2151,10 @@ type OrgDbTable {
   primaryKey: [String!]!
   uniqueKeys: [[String!]!]!
   schemaName: String
+  engine: String
+  comment: String
+  sortingExpression: String
+  primaryExpression: String
 }
 
 type OrgSecret {
@@ -2317,6 +2331,10 @@ type ProcessData {
 }
 
 type ProcessMutations {
+  "Schedule the current release for a future instant. runAt requires an ISO timestamp with offset, more than one minute ahead, within the configured horizon (default two years). Payload must be JSON, at most 65536 UTF-8 bytes. A repeated key replaces a pending schedule and preserves its public UUID. Authority is checked again when due; paused processes are skipped. Requires canBuildWorkflows."
+  scheduleProcessRun(input: ScheduleProcessRunInput!): ScheduledRun
+  "Cancel a pending scheduled run by public UUID. Already-cancelled is idempotent; firing or completed rows cannot be cancelled. Requires canBuildWorkflows in the owning organization."
+  cancelScheduledRun(id: String!): ScheduledRun
   "Create a new process with a default workflow"
   createProcess(name: String!, description: String!, kind: String, timeoutMs: Long, "The trigger the first draft starts with: schedule, webhook, form or manual (the webhook scaffold, which is what a manual run starts from). Omitted = webhook. Standard processes only; an endpoint keeps its own scaffold. Nothing is activated until a release." triggerKind: String): CreateProcessResultGql
   "Create a new workflow in a process, optionally duplicating an existing workflow"
@@ -2347,7 +2365,7 @@ type ProcessMutations {
   generateWebhookApiKey(webhookId: Long!): String
   "Manually run a process now through one of its trigger nodes. Authenticated by the caller's session and bypasses the paused state (pause only gates automated webhook/schedule triggers); records run history with a Manual source."
   runProcess(processId: Long!, triggerNodeName: String!, payload: String): Boolean
-  "Confirm an MCP run authorization request and start the run under the caller's own session. Requires the session of the user who was asked; single-use (a second confirm is rejected as already answered), rejected once the 30-minute window has passed. Same permission (canBuildWorkflows), same Manual source and same run-history row as runProcess. Returns the updated preview with runWorkflowId set, or with status failed and a failureReason when the run could not start."
+  "Confirm an MCP run authorization request and start the run (or create its future schedule when runAt is set) under the caller's own session. Requires the session of the user who was asked; single-use (a second confirm is rejected as already answered), rejected once the 30-minute window has passed. Same permission (canBuildWorkflows), same Manual source and same run-history row as runProcess. Returns the updated preview with runWorkflowId set, or with status failed and a failureReason when the run could not start."
   confirmRunAuthorization(publicId: String!, "Also record a standing approval for MCP runs (\"Approve always\"): from then on, request_run_authorization starts the run immediately for this user instead of minting a link. Personal, revocable from the Standing approvals list, never widens permissions." alwaysAllow: Boolean): RunAuthorizationPreview
   "Decline an MCP run authorization request. Requires the session of the user who was asked; nothing runs and the assistant polling get_run_authorization sees status declined."
   declineRunAuthorization(publicId: String!): RunAuthorizationPreview
@@ -2370,6 +2388,10 @@ type ProcessMutations {
 }
 
 type ProcessQueries {
+  "Find a scheduled run by public UUID or resulting runWorkflowId (exactly one). Requires canBuildWorkflows in its organization."
+  scheduledRun(id: String, runWorkflowId: Long): ScheduledRun
+  "List scheduled runs in ascending time order. Optional status, inclusive from and exclusive to (ISO timestamps with offsets). Cursor pages default to 50, maximum 100. Requires canBuildWorkflows."
+  scheduledRuns(processId: Long!, status: String, from: String, to: String, first: Int, after: String): ScheduledRunConnection
   "List all processes in the current organization"
   listProcesses: [ProcessData!]
   "Get a specific process by ID"
@@ -2545,6 +2567,11 @@ type RunAuthorizationPreview {
   runWorkflowId: Long
   failureReason: String
   autoApproved: Boolean!
+  runAt: String
+  key: String
+  scheduledRunPublicId: String
+  replacesRunAt: String
+  replacesCreatedBy: String
 }
 
 type RunNodeGql {
@@ -2616,6 +2643,41 @@ type ScheduleQueries {
   listSchedules(webUserId: Long, teamId: Long, from: String!, to: String!): [JobSchedule!]
   "The organization's default timezone plus all available IANA timezones"
   timezoneConfig: TimezoneConfig
+}
+
+type ScheduledRun {
+  publicId: String!
+  processPublicId: String!
+  triggerNodeName: String!
+  runAt: String!
+  payload: String
+  key: String
+  status: String!
+  createdByWebUserId: Long
+  createdVia: String!
+  sourceRunId: Long
+  runWorkflowId: Long
+  outcomeReason: String
+  createdAt: String!
+  firedAt: String
+  cancelledAt: String
+  createdByName: String
+  sourceProcessPublicId: String
+}
+
+type ScheduledRunConnection {
+  edges: [ScheduledRunEdge!]!
+  pageInfo: ScheduledRunPageInfo!
+}
+
+type ScheduledRunEdge {
+  cursor: String!
+  node: ScheduledRun!
+}
+
+type ScheduledRunPageInfo {
+  hasNextPage: Boolean!
+  endCursor: String
 }
 
 type ScheduledTrigger {
