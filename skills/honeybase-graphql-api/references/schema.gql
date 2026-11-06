@@ -7,6 +7,13 @@ scalar Long
 "A date-time with a time-zone in the ISO-8601 calendar system using the format 1970-01-01T00:00:00Z[UTC]"
 scalar ZonedDateTime
 
+enum BarryWaitingKind {
+  Approval
+  Input
+  Overflow
+  Question
+}
+
 enum BrowserModelMode {
   Agent
   Gateway
@@ -56,6 +63,7 @@ enum NotificationKind {
   AiCreditsThreshold
   AvailabilityChangeProposed
   AvailabilityChanged
+  BarryWaiting
   Error
   Info
   McpToolDrift
@@ -792,7 +800,7 @@ type AiChatMutations {
   "Stop the in-flight copilot turn"
   cancelChatTurn(chatId: Long!): Boolean
   "Approve or reject a pending tool call; with alwaysAllow, also grant it a standing approval"
-  respondToToolCall(chatId: Long!, toolCallId: String!, approved: Boolean!, "Rejections only: an optional free-text reply the copilot sees verbatim (it may carry the content you actually want, e.g. a corrected form schema). Capped server-side." note: String, "Approvals only: also record a standing approval (\"Approve always\") for this tool, so matching future calls in any of your chats proceed without a card. Personal, revocable (revokeApprovalGrant), never widens permissions - the call still runs under your own rights. On a release (release_workflow, release_agent, release_app) the standing approval covers only that one process, agent or app. Ignored on rejections; refused on cards that ask you for something (input requests and the approvals card itself, manage_approval_grants) and on a release whose target cannot be resolved." alwaysAllow: Boolean, "Input-request cards only: an InputClaim JSON saying what the user created (e.g. {\"Integration\":{\"integrationId\":42}}). It is a POINTER, never a fact and never tool arguments — the server re-reads what it points at under your own permissions and builds the copilot's result from what it finds, so a forged or cross-organization id yields an 'unavailable' result rather than anything the model believes." inputClaim: String): Boolean
+  respondToToolCall(chatId: Long!, toolCallId: String!, approved: Boolean!, "Rejections only: an optional free-text reply the copilot sees verbatim (it may carry the content you actually want, e.g. a corrected form schema). Capped server-side." note: String, "Approvals only: also record a standing approval (\"Approve always\") for this tool, so matching future calls in any of your chats proceed without a card. Personal, revocable (revokeApprovalGrant), never widens permissions - the call still runs under your own rights. On a release (release_workflow, release_agent, release_app) the standing approval covers only that one process, agent or app. Ignored on rejections; refused on cards that ask you for something (input requests and the approvals card itself, manage_approval_grants) and on a release whose target cannot be resolved." alwaysAllow: Boolean, "Input-request cards only: an InputClaim JSON saying what the user created (e.g. {\"Integration\":{\"integrationId\":42}}). It is a POINTER, never a fact and never tool arguments — the server re-reads what it points at under your own permissions and builds the copilot's result from what it finds, so a forged or cross-organization id yields an 'unavailable' result rather than anything the model believes." inputClaim: String, "Question cards (ask_user) only: an AskUserResponse JSON - {\"Answered\":{\"answers\":[{\"id\":\"email\",\"value\":{\"Text\":{\"value\":\"a@b.co\"}}}]}}, {\"FreeText\":{\"text\":\"...\"}}, {\"Asked\":{\"text\":\"...\"}} or {\"Declined\":{}}. Validated against the questions stored on that card; an answer that does not fit, or one sent to a card that asks nothing, is refused. Send approved=true with Answered or FreeText." answers: String): Boolean
   "Removed: the one-click undo of a copilot write no longer exists. Always fails; ask the copilot to put the change back instead (its receipt in the chat says what it was before)."
   undoToolCall(chatId: Long!, "Ignored: the mutation always refuses (undo was removed)." toolCallId: String!): Boolean @deprecated(reason: "Undo was removed (Barry Harness Phase 0). Ask the copilot to put a change back.")
   "Update a chat's settings (mode, tool-call limit, model, connections Barry may not read in this chat)"
@@ -818,11 +826,17 @@ type AiChatQueries {
   barryConversations: [BarryConversation!]
   "The AI connection and model a Barry message with none selected runs on, as the server resolves them: the organization's credits connection, else its only enabled AI connection, with the connection's default model or the product default. Null when the organization has several connections and no credits one (a real choice). Never credentials."
   barryComposerDefault: BarryComposerDefault
+  "The signed-in member's Barry conversations that wait on them in this organization (a card asking for an approval, a setup input or answers, or a turn stopped by an overflowing context), oldest wait first. Conversations are counted, not cards: at most one entry each. Answering, Stop, the overflow's recovery and deleting the conversation end a wait; reading its notification does not."
+  barryAttention: [BarryWaiting!]
+  "Every object one of your Barry conversations still lists as touched (at most 50; the least recently touched are dropped first, ties by kind then public id), newest touch first. What the home pane's tabs are built from."
+  barryConversationObjects(chatId: Long!): [ConversationObject!]
 }
 
 type AiChatSubscriptions {
   "Subscribe to a chat's live events (text deltas, tool calls, diffs, approvals)"
   watchChat(chatId: Long!, "Replay persisted events with seq > fromSeq from the DB before going live (reload-resilience)" fromSeq: Long): [ChatEventGql!]
+  "Live changes to barryAttention: one delta per conversation whose wait began, changed (waiting set) or ended (waiting null). Re-read barryAttention after a reconnect."
+  watchBarryAttention: [BarryAttentionDelta!]
 }
 
 type AiCreditsBalance {
@@ -1123,6 +1137,11 @@ type AvailabilityQueries {
   myWorkSummary: MyWorkSummary
 }
 
+type BarryAttentionDelta {
+  chatId: Long!
+  waiting: BarryWaiting
+}
+
 type BarryComposerDefault {
   integrationId: Long!
   integrationName: String!
@@ -1134,6 +1153,15 @@ type BarryConversation {
   lastActivityAt: String!
   objects: [ConversationObject!]!
   moreObjects: Int!
+}
+
+type BarryWaiting {
+  chatId: Long!
+  kind: BarryWaitingKind!
+  toolCallId: String
+  eventSeq: Long!
+  chatName: String!
+  raisedAt: String!
 }
 
 type BillingActivity {
@@ -1264,6 +1292,7 @@ type ConversationObject {
   kind: ConversationObjectKind!
   publicId: String!
   name: String!
+  touchedAt: String
 }
 
 type CreateProcessResultGql {
