@@ -1393,6 +1393,8 @@ type DashboardMutations {
   unassignDashboardChartTag(publicId: String!, tagId: Long!): Boolean
   "Write (or, with an empty description, remove) the note on a table or column of a source. Returns the annotation, null when removed. Requires canManageDashboards."
   setDashboardAnnotation("Source JSON, as dashboardSources returns it" source: String!, "The table (schema.table or its name)" table: String!, "The column; omit for a note on the table" column: String, "The note, at most 1000 characters; empty removes the annotation" description: String!): DashboardAnnotationDetail
+  "Pin a query that ran as a verified example answering a question: Barry and MCP read it in describe_data_source. Pinning the same handle again rewrites the question. Owners and admins only (not API keys)."
+  pinVerifiedDashboardQuery("The query handle of a query that ran (runDashboardAdhoc, or a Barry run_query result); handles last a day" queryHandle: String!, "The question this query answers, at most 2000 characters" question: String!): DashboardVerifiedQueryDetail
 }
 
 type DashboardQueries {
@@ -1483,6 +1485,19 @@ type DashboardUpdateResult {
   errors: [String!]!
   "conflict: the version now stored"
   currentVersion: Int
+}
+
+"A verified query: SQL a member vouched for and the question it answers, shown to Barry and MCP as an example (Custom Dashboards Phase 3)."
+type DashboardVerifiedQueryDetail {
+  "Source JSON, as dashboardSources returns it"
+  source: String!
+  question: String!
+  "The SQL that ran through the gate (with {{ }} parameters)"
+  sql: String!
+  "Written by a chart save; false for a pinned answer"
+  fromChart: Boolean!
+  verifiedBy: Long
+  updatedAt: String!
 }
 
 type EmbeddedPage {
