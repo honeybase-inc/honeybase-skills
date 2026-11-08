@@ -1958,7 +1958,7 @@ type MetadataBadge {
 }
 
 type Mutations {
-  "Self-service Stripe test billing (canManageBilling)"
+  "Self-service Stripe billing (canManageBilling)"
   billing: BillingMutations!
   "Authentication mutations (login, token refresh)"
   auth: AuthMutations!
@@ -2260,6 +2260,7 @@ type OrganizationPlan {
   creditPacks: [BillingPack!]!
   cancelAt: ZonedDateTime
   creditsAdded: BillingCreditsAdded
+  continuesUntil: ZonedDateTime
 }
 
 type OrganizationQueries {
@@ -3124,6 +3125,8 @@ type UserData {
 }
 
 type UserMutations {
+  "Set the signed-in user’s preferred language for billing notices. Supported values: en, es, es_MX. Requires authentication; affects only the caller."
+  setPreferredLanguage(language: String!): Boolean
   "Create a new user in the organization (requires canManageUsers permission). Returns an outcome rather than failing when the email already has an account: `accountExistsElsewhere` means the address belongs to a real person in another organization, who must be invited and must consent."
   createUser(firstName: String!, lastName: String, email: String!, roleId: Long, teamIds: [Long!]): CreateUserResult
   "Update a user's role in this organization (requires canManageUsers permission). For an external member this changes their role here only, never in their home organization."
