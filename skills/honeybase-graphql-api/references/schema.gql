@@ -1618,6 +1618,11 @@ type EntityActivityPage {
   entity: ActivityEntity
 }
 
+type EnvironmentQueries {
+  "Whether Run In Environment (Python in an E2B sandbox) is available on this deployment. False when the server has no E2B key: the node cannot run and is not offered."
+  enabled: Boolean
+}
+
 type Folder {
   folderId: Long!
   organizationId: Long!
@@ -2630,6 +2635,8 @@ type Queries {
   dashboards: DashboardQueries!
   "Honeybase AI credits queries"
   aiCredits: AiCreditsQueries!
+  "Run In Environment (E2B sandboxes) queries"
+  environment: EnvironmentQueries!
   "Billing queries: the organization's plan"
   billing: BillingQueries!
   "Job schedule queries"
