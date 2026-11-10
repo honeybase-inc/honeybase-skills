@@ -14,6 +14,11 @@ enum BarryWaitingKind {
   Question
 }
 
+enum BrowserLoginStatus {
+  Active
+  NeedsLogin
+}
+
 enum BrowserModelMode {
   Agent
   Gateway
@@ -64,6 +69,7 @@ enum NotificationKind {
   AvailabilityChangeProposed
   AvailabilityChanged
   BarryWaiting
+  BrowserLoginSignedOut
   Error
   Info
   McpToolDrift
@@ -209,6 +215,8 @@ input PermissionsInput {
   canCreateApiKeys: Boolean
   canManageDashboards: Boolean
   canManageBilling: Boolean
+  canManageMemory: Boolean
+  canManageSkills: Boolean
 }
 
 input ProcessSettingsInput {
@@ -405,6 +413,7 @@ type ActivityChange {
   afterPresent: Boolean!
   withheld: Boolean!
   truncated: Boolean!
+  erased: Boolean!
 }
 
 type ActivityEntity {
@@ -793,7 +802,7 @@ type AiChatMutations {
   openBarryThread: WorkflowChat
   "Start a new Barry conversation for the signed-in member, or return their existing empty one"
   newBarryConversation: WorkflowChat
-  "Compact an overflowed conversation with its current model and automatically continue its stored user request. Preserves the full transcript."
+  "Compact an idle conversation with its current model, preserving the full transcript. Overflow recovery also continues the unfinished user request; ordinary idle compaction does not replay completed work."
   compactChat(chatId: Long!): Boolean
   "Send a user message and start the copilot's turn (streams via watchChat)"
   sendChatMessage(chatId: Long!, content: String!, "Workflow chats: the current canvas graph — becomes the chat's working graph" workflowData: WorkflowDataGqlInput, "Agent chats: the builder form's AgentDraftSnapshot JSON — becomes the chat's working draft" agentDraft: String, "App chats: the editor's AppDraftSnapshot JSON — a MANIFEST of the draft (identity, content digest, paths and sizes), never file contents. App files live in app_file and Barry writes them through AppService directly, so there is no working copy to carry" appSnapshot: String, "Home chats: the HomeSnapshot JSON (the organization the chat is scoped to)" homeContext: String, "Task-feedback chats: the TaskFeedbackSnapshot JSON (the agent session the interview is about)" taskFeedbackContext: String, "Barry threads focused on a dashboard: the DashboardSnapshot JSON ({dashboardPublicId, version, editing, pendingOps})" dashboardSnapshot: String, "Barry threads focused on the chart editor: the ChartDraftSnapshot JSON (the editor's unsaved draft)" chartDraft: String, "The AI connection this turn runs on. Omit (with model) to keep the chat's current one, or -- on a chat that has none -- to run on the organization's default AI connection: the Honeybase AI credits connection, else its only enabled AI connection. That is how a member who cannot list connections still sends." integrationId: Long, "The model for this turn. Omit to keep the chat's current one, or to use the connection's default model." model: String, "Public ids of already-uploaded workflow files to attach to this message (pasted images). Ids only: the server rebuilds each reference from its own row, so a name, type or size claimed by the client is never believed. Capped per message and by total bytes; every attachment is replayed on each subsequent turn of the chat." files: [String!]!, "Barry threads only: the editor this message is sent from - workflow | agent | app | task_feedback | dashboard | chart - with focusId. Its snapshot rides in the matching argument above (workflowData, agentDraft, appSnapshot, taskFeedbackContext, dashboardSnapshot, chartDraft); with no focus, send homeContext." focusKind: String, "Barry threads only: the focused editor's subject id (process id, agent id, app id, agent session id, or the focusId of a dashboard or chart; 0 for a new chart)." focusId: Long, "Barry threads only: a SurfaceInput JSON saying where the user is ({page, objectKind?, objectId?, selection?, filters?}). Structure only: the server resolves every name under your own permissions and builds the note Barry reads from it." surface: String): Boolean
@@ -871,6 +880,7 @@ type AiModelInfo {
   recommended: Boolean
   creditsPerMillionInput: Float
   creditsPerMillionOutput: Float
+  supportsPdfInput: Boolean
 }
 
 type ApiKeyEndpointScope {
@@ -1240,6 +1250,29 @@ type BrowserApprovalDetails {
   expiresAtMillis: Long
   sessionExpired: Boolean!
   upload: UploadApprovalDetails
+  login: BrowserLoginApproval
+}
+
+type BrowserLoginApproval {
+  name: String!
+  loggedInBy: String
+}
+
+type BrowserLoginInfo {
+  integrationId: Long!
+  status: BrowserLoginStatus!
+  loggedInBy: String
+  loggedInAt: String
+  lastUsedAt: String
+  signedOutAt: String
+  signedOutReason: String
+  inUse: Boolean!
+}
+
+type BrowserLoginStart {
+  loginId: String!
+  liveViewUrl: String!
+  expiresAtMillis: Long!
 }
 
 "A built-in agent tool: implemented server-side, no backing workflow. `enabled = false` means the server lacks the capability (web_search without an Exa API key)."
@@ -1256,6 +1289,7 @@ type BuiltinWebOptions {
   integrationId: Long
   browserModel: BrowserModelMode!
   browserModelId: String
+  loginIntegrationId: Long
 }
 
 type ChatDataGql {
@@ -1728,6 +1762,12 @@ type IntegrationMutations {
   testClientCredentials(secret: String!, integrationId: Long): String
   "Generate a JSON Schema using an AI integration + model, returning the schema as a JSON string"
   generateAiJsonSchema(integrationId: Long!, model: String!, prompt: String!): String
+  "Open a browser on a saved login's start page and return its live view, for the signed-in person who asked only (requires canManageIntegrations; not available to API keys). The live view URL controls the browser: never share it. The session ends after 10 minutes"
+  startBrowserLogin(integrationId: Long!): BrowserLoginStart
+  "Finish a login started with startBrowserLogin: closes the browser, which saves the login, and marks it active"
+  finishBrowserLogin(loginId: String!): BrowserLoginInfo
+  "Close a login session without marking the login active. What happened in the browser is still saved"
+  cancelBrowserLogin(loginId: String!): Boolean
 }
 
 type IntegrationQueries {
@@ -1758,6 +1798,8 @@ type IntegrationQueries {
   googleOAuthAvailable: Boolean
   "Live schema introspection (tables, columns, primary keys, unique keys) of a Postgres/MySQL/OracleDB integration's database, for the Fetch SQL / Mutate SQL editors. Requires an enabled SQL integration in the caller's organization. For the organization database use orgDatabaseSchema."
   sqlIntegrationSchema(integrationId: Long!): OrgDbSchema
+  "A saved browser login's state: status, who logged in and when, last use, and whether a browser session is using it now (requires canManageIntegrations). Never the browser profile itself"
+  browserLogin(integrationId: Long!): BrowserLoginInfo
 }
 
 type InvitationPreview {
@@ -1950,6 +1992,75 @@ type MemberDeactivationPlan {
   teams: [Team!]!
 }
 
+type MemoryEntry {
+  memoryEntryId: Long!
+  publicId: String!
+  organizationId: Long!
+  scope: String!
+  ownerWebUserId: Long
+  text: String!
+  pinned: Boolean!
+  aboutOrganization: Boolean!
+  sourceChatId: Long
+  sourceQuote: String
+  createdBy: Long!
+  createdVia: String
+  createdAt: String!
+  updatedAt: String!
+  ownerName: String
+  createdByName: String
+}
+
+type MemoryExport {
+  fileName: String!
+  json: String!
+  markdown: String!
+}
+
+type MemoryMutations {
+  "Add a memory. Organization memory requires canManageMemory."
+  createMemory(scope: String!, "One plain sentence, at most 400 characters" text: String!, pinned: Boolean): MemoryEntry
+  "Edit or pin a memory: your own, or (canManageMemory) the organization's and other people's"
+  updateMemory(memoryEntryId: Long!, "New text; omit to keep it" text: String, "Pin or unpin. Pinned memories are always shown to Barry and Barry never changes them" pinned: Boolean): MemoryEntry
+  "Delete a memory. History keeps its before value, so it can be put back."
+  deleteMemory(memoryEntryId: Long!): Boolean
+  "Delete a memory and erase its text and quote from History for good. History keeps that it existed, who changed it and when."
+  eraseMemory(memoryEntryId: Long!): Boolean
+  "Delete and erase every memory of yours in this organization, including the History of memories deleted earlier. Returns how many were deleted."
+  eraseMyMemories: Int
+  "Copy a member's memory to the organization's (you become its author) and delete the original. Requires canManageMemory."
+  moveMemoryToOrganization(memoryEntryId: Long!): MemoryEntry
+}
+
+type MemoryOwner {
+  webUserId: Long!
+  name: String!
+  email: String!
+  entries: Int!
+  suggestions: Int!
+}
+
+type MemoryQueries {
+  "One scope's memories, in the order Barry reads them (pinned first, then most recently updated). Your own and the organization's need no flag; another person's needs canManageMemory."
+  memories("User (one person's memory) or Organization (read by every member's Barry)" scope: String!, "With scope User: whose memory. Omit for your own; another person's needs canManageMemory" ownerWebUserId: Long): [MemoryEntry!]
+  "How much of one scope Barry sees: estimated tokens used and the budget, and the memories that do not fit"
+  memoryUsage("User (one person's memory) or Organization (read by every member's Barry)" scope: String!, "With scope User: whose memory. Omit for your own; another person's needs canManageMemory" ownerWebUserId: Long): MemoryUsage
+  "Collaborators with a memory in this organization. Requires canManageMemory."
+  memoryOwners: [MemoryOwner!]
+  "Your own memory as JSON and markdown (the GDPR access right)"
+  exportMemories: MemoryExport
+}
+
+type MemoryUsage {
+  scope: String!
+  ownerWebUserId: Long
+  usedTokens: Int!
+  budgetTokens: Int!
+  pinnedTokens: Int!
+  entries: Int!
+  omittedIds: [Long!]!
+}
+
 type MetadataBadge {
   key: String!
   color: String!
@@ -2009,6 +2120,8 @@ type Mutations {
   formShares: FormShareMutations!
   "Folder and tag (list view organization) mutations"
   organize: OrganizeMutations!
+  "Barry memory mutations"
+  memory: MemoryMutations!
 }
 
 type MyWorkSummary {
@@ -2344,6 +2457,8 @@ type Permissions {
   canCreateApiKeys: Boolean
   canManageDashboards: Boolean
   canManageBilling: Boolean
+  canManageMemory: Boolean
+  canManageSkills: Boolean
 }
 
 type PlanLimits {
@@ -2544,6 +2659,8 @@ type Queries {
   formResponses: FormResponseQueries!
   "Folder and tag (list view organization) queries"
   organize: OrganizeQueries!
+  "What Barry remembers: your memory, the organization's, and (canManageMemory) collaborators'"
+  memory: MemoryQueries!
   "Bounded committed history using current entity read permissions; deleted roots require Owner/Admin"
   entityActivity(entityKind: String!, entityId: Long!, cursor: String, limit: Int): EntityActivityPage
   "Same as entityActivity, addressed by the entity's public ID (UUID). Live entities only; deleted history requires entityActivity with the stable numeric ID"
@@ -3091,6 +3208,7 @@ type UploadApprovalDetails {
   provider: String!
   notInUploadSites: Boolean!
   firstUploadToSite: Boolean!
+  loginSite: String
 }
 
 type UploadApprovalFile {
