@@ -700,6 +700,14 @@ type AgentSettings {
   uploadAnySite: UploadAnySiteWaiver
 }
 
+type AgentSkillState {
+  skillId: Long!
+  name: String!
+  description: String!
+  activation: String!
+  enabledForAgent: Boolean!
+}
+
 type AgentSubscriptions {
   "Subscribe to an agent run's live events (text deltas, tool calls, approvals)"
   watchAgentRun(agentRunId: Long!, "Replay persisted events with seq > fromSeq before going live (reload-resilience)" fromSeq: Long): [AgentRunEventGql!]
@@ -2054,6 +2062,8 @@ type MemoryQueries {
   memoryOwners: [MemoryOwner!]
   "Your own memory as JSON and markdown (the GDPR access right)"
   exportMemories: MemoryExport
+  "Members' memories flagged as being about the organization: suggestions to move to the organization's memory or to draft a skill from. Requires canManageMemory."
+  memorySuggestions: [MemoryEntry!]
 }
 
 type MemoryUsage {
@@ -2127,6 +2137,8 @@ type Mutations {
   organize: OrganizeMutations!
   "Barry memory mutations"
   memory: MemoryMutations!
+  "Skill mutations"
+  skills: SkillMutations!
 }
 
 type MyWorkSummary {
@@ -2520,6 +2532,7 @@ type ProcessData {
   workflows: [Workflow!]!
   webhooks: [Webhook!]!
   scheduledTriggers: [ScheduledTrigger!]!
+  triggerNodes: [TriggerNodeSummary!]!
 }
 
 type ProcessMutations {
@@ -2695,6 +2708,8 @@ type Queries {
   organize: OrganizeQueries!
   "What Barry remembers: your memory, the organization's, and (canManageMemory) collaborators'"
   memory: MemoryQueries!
+  "Skills: instructions members write or import for Barry and agents"
+  skills: SkillQueries!
   "Bounded committed history using current entity read permissions; deleted roots require Owner/Admin"
   entityActivity(entityKind: String!, entityId: Long!, cursor: String, limit: Int): EntityActivityPage
   "Same as entityActivity, addressed by the entity's public ID (UUID). Live entities only; deleted history requires entityActivity with the stable numeric ID"
@@ -2898,6 +2913,81 @@ type SecretQueries {
 type SheetRef {
   sheetId: Long!
   title: String!
+}
+
+type Skill {
+  skillId: Long!
+  publicId: String!
+  organizationId: Long!
+  scope: String!
+  ownerWebUserId: Long
+  name: String!
+  description: String!
+  body: String!
+  activation: String!
+  enabled: Boolean!
+  license: String
+  compatibility: String
+  metadata: [SkillMetadata!]!
+  allowedTools: String
+  origin: String!
+  sourceMemoryId: Long
+  createdBy: Long!
+  createdVia: String
+  createdAt: String!
+  updatedAt: String!
+  version: Int!
+  ownerName: String
+  createdByName: String
+  disabledForAgents: [SkillAgentSwitch!]!
+}
+
+type SkillAgentSwitch {
+  agentId: Long!
+  agentName: String!
+}
+
+type SkillExport {
+  fileName: String!
+  text: String!
+}
+
+type SkillImport {
+  skill: Skill!
+  notes: [String!]!
+}
+
+type SkillMetadata {
+  key: String!
+  value: String!
+}
+
+type SkillMutations {
+  "Create a skill. It starts disabled. Requires canManageSkills."
+  createSkill("User (applies to your own Barry) or Organization (every member's Barry and every agent)" scope: String!, "Lower-case letters, digits and single hyphens, at most 64 characters" name: String!, "When to use it, at most 1,024 characters" description: String!, "The instructions, markdown, at most 20,000 characters" body: String!, "OnDemand (default) or Always" activation: String): Skill
+  "Change a skill: your own personal skill, or an organization skill. Requires canManageSkills."
+  updateSkill(skillId: Long!, name: String, description: String, body: String, activation: String, "Empty string clears it" license: String, "Empty string clears it" compatibility: String, "The version you edited; the update is refused when the skill changed since" expectedVersion: Int): Skill
+  "Import one SKILL.md. The skill starts disabled; allowed-tools is kept and grants nothing. Requires canManageSkills."
+  importSkill(scope: String!, "One SKILL.md text, at most 32 KB" text: String!): SkillImport
+  "Enable or disable a skill. An organization skill applies to every member's Barry and every agent that has not switched it off. Requires canManageSkills."
+  setSkillEnabled(skillId: Long!, enabled: Boolean!, "The version you reviewed; the change is refused when the skill changed since" expectedVersion: Int): Skill
+  "Delete a skill. History keeps it. Requires canManageSkills."
+  deleteSkill(skillId: Long!): Boolean
+  "Switch an organization skill off (or back on) for one agent, from its next run. Requires canManageSkills and canManageAgents."
+  setAgentSkillEnabled(agentId: Long!, skillId: Long!, enabled: Boolean!): AgentSkillState
+  "Draft a disabled organization skill from a member's memory. Requires canManageSkills and canManageMemory."
+  draftSkillFromMemory(memoryEntryId: Long!): Skill
+}
+
+type SkillQueries {
+  "The organization's skills (drafts only with canManageSkills) and your own personal skills, by name"
+  skills: [Skill!]
+  "One skill by its public id"
+  skill(publicId: String!): Skill
+  "A skill as a SKILL.md file"
+  exportSkill(skillId: Long!): SkillExport
+  "The organization's enabled skills and whether this agent applies each one"
+  agentSkills(agentId: Long!): [AgentSkillState!]
 }
 
 type SlackCapabilities {
@@ -3229,6 +3319,11 @@ type ToolQueries {
   getTool(toolId: Long, publicId: String): ToolData
   "Evaluate an output selection against the tool process's most recent completed run (None = no completed run yet)"
   previewToolOutput(toolId: Long!, "ToolOutputSelection JSON to preview; omitted = the tool's saved selection" outputSelection: String): String
+}
+
+type TriggerNodeSummary {
+  nodeName: String!
+  nodeType: String!
 }
 
 type UploadAnySiteWaiver {
