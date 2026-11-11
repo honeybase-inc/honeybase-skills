@@ -2284,6 +2284,10 @@ type OrgDatabaseMutations {
   deprovisionOrgDatabase: Boolean
   "Mint a short-lived, single-use ticket the SPA hands to the embedded pgweb database browser as its connect resource. role is \"ro\" or \"rw\"; \"rw\" requires canManageOrgDatabase, \"ro\" needs canQueryOrgDatabase (the default and floor is read-only). The ticket carries NO credentials — pgweb redeems it server-side. Requires a Ready database."
   orgDatabaseConnectTicket(role: String!): String
+  "Turn \"Honeybase data\" on or off, or change its interval. On: copies the organization's reporting views (including member emails and form answers) into a `honeybase` schema of its database, readable by everyone with the database's read-only or read-write credentials; the first pass starts at once. Off: drops the schema. Requires canManageOrgDatabase and canManageDashboards, and a Ready database."
+  configureOrgDatabaseReportingSync(enabled: Boolean!, "Minutes between passes, 15 to 1440 (default 60, or the current value)." intervalMinutes: Int): OrgDatabaseReportingSync
+  "Run a \"Honeybase data\" pass now, including the reconcile that removes rows deleted in Honeybase. Requires canManageOrgDatabase and canManageDashboards."
+  syncOrgDatabaseReportingNow: OrgDatabaseReportingSync
 }
 
 type OrgDatabaseQueries {
@@ -2293,6 +2297,29 @@ type OrgDatabaseQueries {
   orgDatabaseCredentials: [OrgDatabaseCredential!]
   "Live introspection of the organization database's public schema (tables, columns, primary keys) for the FetchSQL/MutateSQL editors. Requires canQueryOrgDatabase and a Ready database."
   orgDatabaseSchema(integrationId: Long!): OrgDbSchema
+  "\"Honeybase data\": whether the organization's reporting views are copied into a read-only `honeybase` schema of its database, how often, when it last ran (dataAsOf, lastError) and the copied tables. canConfigure says whether the caller may change it. Requires canQueryOrgDatabase, canManageOrgDatabase or canManageDashboards."
+  orgDatabaseReportingSync: OrgDatabaseReportingSync
+}
+
+type OrgDatabaseReportingSync {
+  available: Boolean!
+  enabled: Boolean!
+  intervalMinutes: Int!
+  running: Boolean!
+  lastStartedAt: String
+  lastFinishedAt: String
+  dataAsOf: String
+  lastResult: String
+  lastError: String
+  canConfigure: Boolean!
+  tables: [OrgDatabaseReportingSyncTable!]!
+}
+
+type OrgDatabaseReportingSyncTable {
+  relation: String!
+  strategy: String!
+  rowCount: Long!
+  syncedAt: String
 }
 
 type OrgDbColumn {
