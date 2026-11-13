@@ -317,6 +317,7 @@ input WorkflowDataGqlInput {
   workflow: WorkflowInput!
   nodes: [NodeGqlInput!]!
   nodeConnections: [NodeConnectionInput!]!
+  configurationWarnings: [String!]
 }
 
 input WorkflowInput {
@@ -2593,6 +2594,8 @@ type ProcessMutations {
 }
 
 type ProcessQueries {
+  "Last 50 endpoint calls or webhook rejections, retained seven days. Organization-scoped metadata; no request bodies. Optional webhookNodeName selects a webhook trigger."
+  recentCalls(processId: Long!, webhookNodeName: String): [RecentCall!]
   "Find a scheduled run by public UUID or resulting runWorkflowId (exactly one). Requires canBuildWorkflows in its organization."
   scheduledRun(id: String, runWorkflowId: Long): ScheduledRun
   "List scheduled runs in ascending time order. Optional status, inclusive from and exclusive to (ISO timestamps with offsets). Cursor pages default to 50, maximum 100. Requires canBuildWorkflows."
@@ -2729,6 +2732,17 @@ type ReassignPlanItem {
   task: WorkflowTask!
   recipient: Long
   reason: String!
+}
+
+type RecentCall {
+  timestamp: Long!
+  variant: String!
+  status: Int!
+  outcome: String!
+  durationMs: Long!
+  contractPaths: [String!]!
+  failedNode: String
+  stopMessage: String
 }
 
 type RefreshToken {
@@ -3492,6 +3506,7 @@ type WorkflowDataGql {
   workflow: Workflow!
   nodes: [NodeGql!]!
   nodeConnections: [NodeConnection!]!
+  configurationWarnings: [String!]
 }
 
 type WorkflowFileUploadTicket {
