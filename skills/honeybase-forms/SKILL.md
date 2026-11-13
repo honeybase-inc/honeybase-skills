@@ -1,7 +1,7 @@
 ---
 name: honeybase-forms
 description: Author SurveyJS form definitions for Honeybase tasks — the 15 allowed question types and why the rest are refused, the nine blocked keys, question naming (a question `name` becomes `task.form.data.<name>` downstream), the attach/snapshot lifecycle, conditional-logic idioms, and worked examples that are CI-verified to validate and render. Honeybase forms are a deliberately subsetted SurveyJS and nothing about that subset is in your training data — ALWAYS load this before writing or editing a Honeybase form schema (`validate_form_schema`, `create_form`, `update_form`, or a Create/Update Task node's `formAttachment`).
-version: 2026-09-15
+version: 2026-11-12
 ---
 
 # Honeybase forms
@@ -61,6 +61,20 @@ Two different things with confusable names:
 | `required: true` | on the node's **`formAttachment`** | Honeybase will not let the **task** be completed until the form is submitted |
 
 There is **no `required` property on a SurveyJS question**. Writing `"required": true` on a question is silently ignored by survey-core (it is not in the serializer) and validates on the server — a classic invisible bug. Always `isRequired`.
+
+## Sending a form by link
+
+A form can also be answered through a public link (`forms.honeybase.ai/<token>`), with no Honeybase account. Never write a placeholder link; pick one of two ways:
+
+- **One standing link**, the same URL every time (a weekly reminder, a website, a QR code): call **`share_form`** (needs the `release` scope) with the form's `publicId` and put the returned `url` into the email body or message. Optional `expiresInDays` and `maxResponses`; omitted, the link stays open with no answer limit until someone revokes it from the form page. It serves the form as it is now: later edits reach the link only when someone updates it from the form page.
+- **A link per run or per recipient**: a **Create Pre-filled Form node** (`CreatePrefilledFormData`, `formId` = the form's public UUID) mints it when the workflow runs; send `{{ <thatNode>.result.url }}` from a Send Email / Slack / WhatsApp node after it.
+
+For the node:
+
+- Both prefill expressions are optional; with neither, it is a plain link.
+- `maxResponses` defaults to **1** (single-use). For one link sent to a group, set it to the answers you expect and `expiresInDays` to the collection window (7 for a weekly form), so each run's link closes before the next.
+- Answers arrive as a **new run** of a Form Submission Trigger (`formId`, `source: "PublicLink"`). When they are the next stage of the same playbook, put that trigger in the same workflow: a workflow can hold several triggers.
+- For organization members, a Create Task node with the form usually fits better: the answer stays on the task.
 
 ## Question names are the downstream contract
 

@@ -1,7 +1,7 @@
 ---
 name: honeybase-mcp
 description: Drive Honeybase through its remote MCP server — connect an AI client over OAuth, then read and write tasks, processes, runs, teams, schedules, availability, agents, forms and the org database as MCP tools. Honeybase is a workflow-automation platform with no public documentation and AI models are not trained on it, so ALWAYS load this skill before connecting to or calling the Honeybase MCP server. Complements honeybase-graphql-api (raw GraphQL) and honeybase-forms (form authoring).
-version: 2026-11-08
+version: 2026-11-12
 ---
 
 # Honeybase MCP
@@ -28,7 +28,7 @@ Approved at connect time; the token carries exactly the granted set. Request the
 |---|---|
 | `read` | read-only tools across all surfaces (list/get tasks, processes, runs, teams, schedules, availability, agents, forms) |
 | `write` | mutating tools (create/update tasks, save workflow drafts, create forms, schedules, teams, …) |
-| `release` | releasing a workflow/agent version (turning a draft into an immutable release) — a deliberately separate, higher-tier capability |
+| `release` | releasing a workflow/agent version (turning a draft into an immutable release), and making a form public with `share_form` — a deliberately separate, higher-tier capability |
 | `orgdb.read` | read the organization's own PostgreSQL database |
 | `orgdb.write` | insert/update/delete rows in the org database |
 | `orgdb.ddl` | schema changes (DDL) on the org database — separate from `orgdb.write` on purpose |
@@ -52,7 +52,7 @@ The surfaces the tools cover (categories, not an exhaustive list — confirm wit
 
 - **Tasks** — list/get/create/update, the audit trail.
 - **Processes & workflows** — list processes (standard **and** endpoint rows, each with a `kind`), read a workflow (draft or released; manifest includes `processKind`), save a draft, release; `create_process` accepts optional `kind` (`standard` default, or `endpoint` — not `tool`, use `create_tool`). List and read **runs** (`list_runs` / run results are the debugging surface for a failed production run). A released version is immutable, but saving or releasing one does not fail: it creates a new row (a draft, or the next version) and the result's `forkedFrom` / `publicId` say so.
-- **One process per playbook, not per trigger.** A workflow can hold several trigger nodes; each starts its own run, which executes only the nodes downstream of it. When a new automation is another stage of a playbook that already has a process (it sends or answers the same form, follows up the same task, reads or writes the same sheet or data), add its trigger and path to that process's draft with `save_workflow_draft` in patch mode instead of calling `create_process`. `list_processes_and_workflows` shows each process's description and its trigger nodes (the release's, or the draft's when nothing is released) to judge that. Keep each trigger's path separate: a node reached from two triggers only sees the outputs on the path that fired (the save result warns when an expression would break that way). Endpoint and tool processes keep their single entry; unrelated work gets its own process.
+- **One process per playbook, not per trigger.** A workflow can hold several trigger nodes; each starts its own run, which executes only the nodes downstream of it. When a new automation is another stage of a playbook that already has a process (it sends or answers the same form, follows up the same task, reads or writes the same sheet or data), add its trigger and path to that process's draft with `save_workflow_draft` in patch mode instead of calling `create_process`. `list_processes_and_workflows` shows each process's description, its trigger nodes (the release's, or the draft's when nothing is released) and `uses` (the forms, tables and sheets it works with) to judge that. Its `query` matches words, best match first, including those forms and tables, so search for the form or data too, not only the process name; an entry with `partialMatch: true` matched only some of the words. Keep each trigger's path separate: a node reached from two triggers only sees the outputs on the path that fired (the save result warns when an expression would break that way). Endpoint and tool processes keep their single entry; unrelated work gets its own process.
 
 **Standard vs endpoint (webhooks vs sync API):**
 
