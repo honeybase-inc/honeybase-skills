@@ -102,6 +102,9 @@ input ApiKeyScopesInput {
 input EmbeddedPageInput {
   name: String!
   url: String!
+  revisionId: String
+  sizeBytes: Int
+  sha256: String
 }
 
 input FormSubmissionInput {
@@ -272,6 +275,13 @@ input TaskFormInput {
   submission: FormSubmissionInput
   prefillData: String
   presentation: String
+}
+
+input TaskPageInput {
+  name: String!
+  url: String
+  html: String
+  revisionId: String
 }
 
 input TaskViewColumnInput {
@@ -1575,6 +1585,9 @@ type DashboardVerifiedQueryDetail {
 type EmbeddedPage {
   name: String!
   url: String!
+  revisionId: String
+  sizeBytes: Int
+  sha256: String
 }
 
 type EndpointMutations {
@@ -3074,10 +3087,14 @@ type TaskForm {
 }
 
 type TaskMutations {
+  updateTaskPages(taskId: Long!, pages: [TaskPageInput!]!): WorkflowTask
+  taskPageTicket(taskId: Long!, revisionId: String!): String
+  "Preview unsaved task-page HTML: a single-use, 60-second link that renders the given HTML in the same sandbox as a saved page. Nothing is stored."
+  taskPageDraftTicket(taskId: Long!, html: String!): String
   "Create a new task"
   createTask(task: WorkflowTaskInput!): WorkflowTask
   "Create a new task with user or team-based assignment. Provide userId for direct assignment or teamId for random team member assignment."
-  createTaskWithAssignment(name: String!, dueDate: LocalDate!, priority: String!, userId: Long, teamId: Long, relatedWorkflow: Long, description: String, metadata: String, embeddedPages: [EmbeddedPageInput!], teamAssigneeMethod: String): WorkflowTask
+  createTaskWithAssignment(name: String!, dueDate: LocalDate!, priority: String!, userId: Long, teamId: Long, relatedWorkflow: Long, description: String, metadata: String, embeddedPages: [EmbeddedPageInput!], teamAssigneeMethod: String, pages: [TaskPageInput!]): WorkflowTask
   "Mark task as completed or incomplete"
   updateTaskStatus(taskId: Long!, completed: Boolean!): WorkflowTask
   "Reassign task to another user"
@@ -3122,6 +3139,14 @@ type TaskMutations {
   batchDeleteTasks(taskIds: [Long!]!): Int
 }
 
+type TaskPageSource {
+  revisionId: String!
+  content: String!
+  offset: Int!
+  totalChars: Int!
+  nextOffset: Int
+}
+
 type TaskQueries {
   "Get a specific task by ID"
   getTask(taskId: Long, publicId: String): WorkflowTask
@@ -3137,6 +3162,8 @@ type TaskQueries {
   taskTimeSeries("Bucket size: hour, day, week, or month" granularity: String!, "completed (by completion time) or pending (by due date)" mode: String!, "Inclusive start of the range (by completion/due date)" from: LocalDate!, "Inclusive end of the range (by completion/due date)" to: LocalDate!, assignedTo: [Long!], relatedTeams: [Long!], relatedProcesses: [Long!], priorities: [String!], "IANA zone the Hour buckets are computed in (e.g. America/Mexico_City). Defaults to UTC — never the server JVM default." timezone: String): [TaskSeriesPoint!]
   "One newest-first page of the task's audit trail (who changed which field, old -> new), with resolved actor display info"
   taskUpdates(taskId: Long!, "Pagination cursor: return audit rows with taskUpdateId strictly below this (newest page when omitted)." before: Long, "Page size; server-clamped to 1-100 (default 50)." limit: Int): TaskUpdatesPage
+  "Explicitly read one page of an HTML revision's source. Offsets count UTF-16 characters; follow nextOffset until null. Source is excluded from ordinary task reads."
+  taskPageSource(taskId: Long!, revisionId: String!, offset: Int, limit: Int): TaskPageSource
   "The agent session working this task, with its timeline and the runs behind it. Null when no agent has ever worked the task."
   taskAgentSession(taskId: Long!): AgentTaskSessionView
 }
