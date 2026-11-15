@@ -89,6 +89,7 @@ enum WebProvider {
   Browserbase
   Exa
   Firecrawl
+  Parallel
 }
 
 input ApiKeyScopesInput {
@@ -321,6 +322,7 @@ input WebToolDefaultInput {
   provider: WebProvider
   integrationId: Long
   browserModel: BrowserModelMode
+  proxies: Boolean
 }
 
 input WorkflowDataGqlInput {
@@ -511,6 +513,10 @@ type AgentMutations {
   respondToAgentToolCall(agentRunId: Long!, toolCallId: String!, approved: Boolean!, "Shown to the model on rejection so it adapts" message: String, "Edited arguments JSON (edit-args-then-approve)" editedArgs: String, "Upload approvals only: also add the card's destination site to the agent's upload sites (draft and live release), so later uploads there run under the tool's normal policy. Requires agent-management permission; ignored on rejections." allowUploadSite: Boolean): Boolean
   "Stop an in-flight agent run"
   cancelAgentRun(agentRunId: Long!): Boolean
+  "Open the live browser of an agent run that is waiting for a person to clear a page (a code prompt, a sign-in, a CAPTCHA). Returns the live view URL, which controls the browser: it is returned only here and never stored. Only a person in the Honeybase app: never an API key. A session signed in with a saved login requires canManageIntegrations; otherwise a chat's handoff requires canRunAgents or canManageAgents, and a task's requires its owner, its team or canManageAgents."
+  openBrowserHandoff(handoffId: String!): BrowserHandoffOpen
+  "End a browser handoff: cleared = true when the page is clear (the agent continues in the same browser), false when it cannot be cleared. Same permissions as openBrowserHandoff."
+  finishBrowserHandoff(handoffId: String!, cleared: Boolean!): Boolean
   "Close the caller's test session; the next turn starts fresh"
   resetTestSession(agentId: Long!): Boolean
   "Generate or rotate the agent's external API key (the credential for its per-agent MCP endpoint). Returns the plaintext key ONCE; rotating invalidates the previous key immediately. Requires a released version."
@@ -560,6 +566,7 @@ type AgentRequestPayload {
   context: String
   form: TaskForm
   browser: BrowserApprovalDetails
+  handoff: BrowserHandoffDetails
 }
 
 type AgentRun {
@@ -1207,6 +1214,8 @@ type BillingCheckoutReturn {
   planKind: String
   quantity: Long!
   fulfilled: Boolean!
+  runsAdded: Long
+  creditsAdded: Long
 }
 
 type BillingCreditsAdded {
@@ -1214,11 +1223,16 @@ type BillingCreditsAdded {
   purchased: Long!
 }
 
+type BillingCreditsUsage {
+  used: Long!
+  available: Long!
+}
+
 type BillingMutations {
   "Open hosted USD Checkout for a configured paid plan. Requires canManageBilling, Stripe provider and a non-Internal plan; existing subscribers use the portal. No entitlements are granted on return."
   startCheckout(planKind: String!): String
-  "Open the configured Stripe billing portal for this organization. Requires canManageBilling and Stripe provider; Internal plans are excluded."
-  openBillingPortal: String
+  "Open the configured Stripe billing portal for this organization, optionally at a specific step (`flow`). Requires canManageBilling and Stripe provider; Internal plans are excluded. A plan change needs an existing subscription."
+  openBillingPortal("Where the portal opens: `payment_method_update` (replace the card) or `subscription_update` (change plan; with `planKind`, a plan above the current one opens Stripe's confirmation with that plan preselected, a lower one opens Stripe's plan picker, which schedules it for the end of the period). Omit for the portal home." flow: String, "The plan to change to, for `flow: subscription_update`: starter, pro or advanced." planKind: String): String
   "Buy a configured Runs pack by its quantity. Requires canManageBilling; fulfillment follows a verified paid webhook."
   buyRuns(pack: Long!): String
   "Buy a configured Credits pack by its quantity. Requires canManageBilling; fulfillment follows a verified paid webhook."
@@ -1233,6 +1247,7 @@ type BillingPack {
 type BillingPlanOffer {
   kind: String!
   priceCents: Int!
+  limits: PlanLimits
 }
 
 type BillingQueries {
@@ -1272,6 +1287,21 @@ type BrowserApprovalDetails {
   login: BrowserLoginApproval
 }
 
+type BrowserHandoffDetails {
+  handoffId: String!
+  trigger: String!
+  reason: String
+  note: String
+  loginName: String
+  needsIntegrationManager: Boolean!
+  deadlineMillis: Long!
+}
+
+type BrowserHandoffOpen {
+  liveViewUrl: String!
+  expiresAtMillis: Long!
+}
+
 type BrowserLoginApproval {
   name: String!
   loggedInBy: String
@@ -1309,6 +1339,8 @@ type BuiltinWebOptions {
   browserModel: BrowserModelMode!
   browserModelId: String
   loginIntegrationId: Long
+  proxies: Boolean!
+  research: ResearchOptions
 }
 
 type ChatDataGql {
@@ -2432,6 +2464,8 @@ type OrganizationPlan {
   cancelAt: ZonedDateTime
   creditsAdded: BillingCreditsAdded
   continuesUntil: ZonedDateTime
+  creditsUsage: BillingCreditsUsage
+  portalAvailable: Boolean!
 }
 
 type OrganizationQueries {
@@ -2637,6 +2671,8 @@ type ProcessQueries {
   endpointPublicAccess(processPublicId: String!): EndpointPublicAccessGql
   "The vendor-side state of each Web Monitor trigger of a process's current release: pending, active, paused or error (with the reason). Empty when the process has none."
   webMonitorStatuses(processId: Long!): [WebMonitorStatus!]
+  "The first 64 KB of a text, CSV or JSON file named by a file reference, for the file viewer. Takes the reference's `publicId` and `source`. The same access as workflowFileDownloadUrl: a member of the owning organization, and for a public form's upload canManageForms. Fails for a file that is not text."
+  workflowFilePreview(publicId: String!, source: String): WorkflowFilePreview
 }
 
 type ProcessSettings {
@@ -2769,6 +2805,20 @@ type RemoveAccessPlan {
   blocked: Int!
   teamCount: Int!
   scheduleCount: Int!
+}
+
+type ResearchOptions {
+  providers: [ResearchProviderOption!]!
+  defaultProvider: WebProvider
+  contactEnrichment: Boolean
+}
+
+type ResearchProviderOption {
+  provider: WebProvider!
+  integrationId: Long
+  allowedTiers: [String!]!
+  defaultTier: String
+  maxCostUsd: Float
 }
 
 type Role {
@@ -3301,6 +3351,7 @@ type TestSessionData {
   session: AgentSession!
   messages: [AgentSessionMessage!]!
   activeRun: AgentRun
+  researchPending: Int!
 }
 
 type TileMapping {
@@ -3470,6 +3521,7 @@ type WebToolDefault {
   provider: WebProvider
   integrationId: Long
   browserModel: BrowserModelMode
+  proxies: Boolean
 }
 
 type Webhook {
@@ -3534,6 +3586,12 @@ type WorkflowDataGql {
   nodes: [NodeGql!]!
   nodeConnections: [NodeConnection!]!
   configurationWarnings: [String!]
+}
+
+type WorkflowFilePreview {
+  text: String!
+  truncated: Boolean!
+  totalBytes: Long!
 }
 
 type WorkflowFileUploadTicket {
