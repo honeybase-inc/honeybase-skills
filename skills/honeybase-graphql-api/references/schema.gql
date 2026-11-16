@@ -14,6 +14,24 @@ enum BarryWaitingKind {
   Question
 }
 
+enum BrowserLoginAttemptOutcome {
+  Failed
+  Inconclusive
+  Interrupted
+  LoggedIn
+}
+
+enum BrowserLoginAutoRelogin {
+  On
+  Suspended
+}
+
+enum BrowserLoginHealth {
+  Inconclusive
+  LoggedIn
+  LoggedOut
+}
+
 enum BrowserLoginStatus {
   Active
   NeedsLogin
@@ -1320,6 +1338,18 @@ type BrowserLoginApproval {
   loggedInBy: String
 }
 
+type BrowserLoginCredentialsInfo {
+  usernameSet: Boolean!
+  passwordSet: Boolean!
+  totpSet: Boolean!
+  storedBy: String
+  storedAt: String!
+  autoRelogin: BrowserLoginAutoRelogin!
+  suspendedReason: String
+  lastAttemptAt: String
+  lastAttemptOutcome: BrowserLoginAttemptOutcome
+}
+
 type BrowserLoginInfo {
   integrationId: Long!
   status: BrowserLoginStatus!
@@ -1329,6 +1359,9 @@ type BrowserLoginInfo {
   signedOutAt: String
   signedOutReason: String
   inUse: Boolean!
+  credentials: BrowserLoginCredentialsInfo
+  healthCheckedAt: String
+  healthResult: BrowserLoginHealth
 }
 
 type BrowserLoginStart {
@@ -1859,6 +1892,8 @@ type IntegrationMutations {
   finishBrowserLogin(loginId: String!): BrowserLoginInfo
   "Close a login session without marking the login active. What happened in the browser is still saved"
   cancelBrowserLogin(loginId: String!): Boolean
+  "Store, change or clear a saved login's portal credentials (username, password, authenticator key), which Honeybase types into the site when the login is signed out. Write-only: the answer says only whether each is set. A person in the app only (requires canManageIntegrations; not available to API keys)"
+  setBrowserLoginCredentials(integrationId: Long!, "The portal username. The unchanged marker __HONEYBASE_SECRET_UNCHANGED__ keeps the stored value; an empty string removes it" username: String!, "The portal password. The unchanged marker keeps the stored value; an empty string removes it" password: String!, "The authenticator (TOTP) setup key, as Base32 or an otpauth://totp/ link. The unchanged marker keeps the stored value; an empty string removes it" totpKey: String!, "The person confirms they understand that Honeybase will store the credentials and type them into the site, and that a stored authenticator key turns the second factor into a second password. Required whenever anything is stored" consent: Boolean!): BrowserLoginInfo
 }
 
 type IntegrationQueries {
