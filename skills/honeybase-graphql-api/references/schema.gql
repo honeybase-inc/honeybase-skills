@@ -56,6 +56,17 @@ enum ConversationObjectKind {
   Task
 }
 
+enum EnvironmentLanguage {
+  Bash
+  Python
+}
+
+enum NetworkLevel {
+  All
+  Domains
+  None
+}
+
 enum NotificationKind {
   AgentBudgetExhausted
   AgentBudgetThreshold
@@ -566,6 +577,7 @@ type AgentRequestPayload {
   context: String
   form: TaskForm
   browser: BrowserApprovalDetails
+  code: CodeRunRequest
   handoff: BrowserHandoffDetails
 }
 
@@ -769,6 +781,7 @@ type AgentToolRef {
   mcp: McpToolRef
   policy: String!
   builtinOptions: BuiltinWebOptions
+  sandboxOptions: BuiltinSandboxOptions
 }
 
 type AgentUsage {
@@ -1324,6 +1337,13 @@ type BrowserLoginStart {
   expiresAtMillis: Long!
 }
 
+type BuiltinSandboxOptions {
+  network: NetworkLevel!
+  allowedDomains: [String!]!
+  packageRegistries: Boolean!
+  timeoutSeconds: Int
+}
+
 "A built-in agent tool: implemented server-side, no backing workflow. `enabled = false` means the server lacks the capability (web_search without an Exa API key)."
 type BuiltinToolGql {
   key: String!
@@ -1364,6 +1384,18 @@ type ChatSettings {
   disabledIntegrationIds: [Long!]!
   disabledToolIds: [Long!]!
   disabledMcpToolIds: [McpToolRef!]!
+}
+
+type CodeRunRequest {
+  summary: String!
+  language: EnvironmentLanguage!
+  code: String!
+  network: NetworkLevel!
+  allowedDomains: [String!]!
+  packageRegistries: Boolean!
+  inputNames: [String!]!
+  dataBytes: Long!
+  timeoutSeconds: Int!
 }
 
 type ConnectionProbe {
@@ -2417,6 +2449,17 @@ type Organization {
   timezone: String!
 }
 
+"Organization run_code setting. network None with packageRegistries false is the default: no internet."
+type OrganizationCodeDefaults {
+  network: NetworkLevel!
+  "Hosts a run may reach; read only when network is Domains"
+  allowedDomains: [String!]!
+  "Opens the public package registries (PyPI, Debian, npm) so pip, apt-get and npm work"
+  packageRegistries: Boolean!
+  "Whether the caller may change it (Owner or Admin role)"
+  canEdit: Boolean!
+}
+
 type OrganizationInvitation {
   invitationId: Long!
   email: String!
@@ -2439,6 +2482,8 @@ type OrganizationMutations {
   renameOrganization(name: String!): Boolean
   "Set the organization's web defaults (all three entries; null = the Honeybase default). Requires Owner or Admin role. Each entry is checked: a provider the tool supports, and a connection of this organization, of the provider's type, enabled and with a key. Existing agents keep their saved tool settings."
   setWebDefaults(search: WebToolDefaultInput, fetch: WebToolDefaultInput, interact: WebToolDefaultInput): OrganizationWebDefaults
+  "Set the organization's run_code setting. Requires Owner or Admin role. Domains are checked like a Run In Environment node's (a host or *.host, at least one at Domains). Existing agents keep their own run_code setting."
+  setCodeDefaults(network: NetworkLevel!, allowedDomains: [String!]!, packageRegistries: Boolean!): OrganizationCodeDefaults
 }
 
 type OrganizationPlan {
@@ -2473,6 +2518,8 @@ type OrganizationQueries {
   switchableOrganizations: [Organization!]
   "The organization's web defaults: the provider and payer each web tool uses for Barry, and what an agent's web tool starts with when it is first added. Readable by any authenticated caller of the organization, API keys included; holds providers and connection ids, never a credential."
   webDefaults: OrganizationWebDefaults
+  "The organization's run_code setting: what code Barry and MCP clients run may reach, and what a newly attached agent run_code tool starts with. A run with no internet and no package installs runs without asking; any other setting asks first (a standing approval can cover it). Readable by any authenticated caller of the organization."
+  codeDefaults: OrganizationCodeDefaults
 }
 
 "Organization web defaults. A null entry means that tool's Honeybase default: Exa search, Firecrawl fetch, Browserbase interaction, all paid by Honeybase."
