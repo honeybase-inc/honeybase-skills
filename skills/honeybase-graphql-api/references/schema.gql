@@ -7,6 +7,16 @@ scalar Long
 "A date-time with a time-zone in the ISO-8601 calendar system using the format 1970-01-01T00:00:00Z[UTC]"
 scalar ZonedDateTime
 
+enum AppCategory {
+  Crm
+  CustomerSupport
+  Finance
+  Forms
+  Productivity
+  ProjectManagement
+  Scheduling
+}
+
 enum BarryWaitingKind {
   Approval
   Input
@@ -109,6 +119,12 @@ enum NotificationKind {
   Warning
 }
 
+enum ResearchPriceKind {
+  Capped
+  Credits
+  Fixed
+}
+
 enum RunDirection {
   Backward
   Forward
@@ -135,6 +151,7 @@ input EmbeddedPageInput {
   revisionId: String
   sizeBytes: Int
   sha256: String
+  grants: TaskPageGrantsInput
 }
 
 input FormSubmissionInput {
@@ -307,11 +324,25 @@ input TaskFormInput {
   presentation: String
 }
 
+input TaskPageEndpointGrantInput {
+  endpointId: String!
+  confirm: Boolean
+  pin: String
+  name: String
+}
+
+input TaskPageGrantsInput {
+  endpoints: [TaskPageEndpointGrantInput!]
+  publicNetwork: Boolean
+}
+
 input TaskPageInput {
   name: String!
   url: String
   html: String
   revisionId: String
+  grants: TaskPageGrantsInput
+  previousRevisionId: String
 }
 
 input TaskViewColumnInput {
@@ -573,6 +604,8 @@ type AgentQueries {
   agentUsage("Window in days for the daily buckets (1-90, default 30)" days: Int): AgentUsage
   "The built-in agent tools (web_search, web_fetch) with availability on this server"
   listBuiltinTools: [BuiltinToolGql!]
+  "The deep research (web_research) tier catalog: each provider's tiers with the provider's published price, typical duration and what the tier is good for. Prices are estimates; the organization's own provider account is billed, never Honeybase."
+  webResearchTiers: [ResearchTier!]
   "The native agent tools one integration brings with it, with their derived tool names"
   listNativeTools(integrationId: Long!): [NativeToolGql!]
   "What people taught this agent, newest first, with provenance (the task it was learned on and who approved it). Requires canRunAgents or canManageAgents."
@@ -638,6 +671,7 @@ type AgentRunDetail {
   steps: [AgentRunStep!]!
   agentName: String!
   children: [AgentRunChildSummary!]!
+  researchWaiting: Boolean!
 }
 
 type AgentRunEventGql {
@@ -1431,6 +1465,21 @@ type CodeRunRequest {
   timeoutSeconds: Int!
 }
 
+type ConnectableApp {
+  id: String!
+  title: String!
+  category: AppCategory!
+  logo: String!
+  mcp: McpPreset
+  connectedIntegrations: [ConnectedAppIntegration!]!
+}
+
+type ConnectedAppIntegration {
+  id: Long!
+  publicId: String!
+  name: String!
+}
+
 type ConnectionProbe {
   ok: Boolean!
   error: String
@@ -1685,6 +1734,7 @@ type EmbeddedPage {
   revisionId: String
   sizeBytes: Int
   sha256: String
+  grants: TaskPageGrants
 }
 
 type EndpointMutations {
@@ -1897,6 +1947,8 @@ type IntegrationMutations {
 }
 
 type IntegrationQueries {
+  "Apps with trusted connection presets and matching integrations in the current organization; matching rows may still need authorization"
+  connectableApps: [ConnectableApp!]!
   "List all integrations in the current organization"
   listIntegrations: [Integration!]
   "Get a specific integration by numeric id or public id (exactly one)"
@@ -2001,6 +2053,7 @@ type McpConnectionDetail {
   oauthIssuer: String
   sync: McpConnectionSyncState!
   tools: [McpConnectionTool!]!
+  needsAuthorization: Boolean!
 }
 
 type McpConnectionMutations {
@@ -2034,6 +2087,7 @@ type McpConnectionSummary {
   enabled: Boolean!
   syncStatus: String!
   tools: [McpToolListing!]!
+  needsAuthorization: Boolean!
 }
 
 type McpConnectionSyncState {
@@ -2062,6 +2116,12 @@ type McpConnectionTool {
   lastSeenAt: String
   suggestion: McpTierSuggestion
   approvalSuggestion: McpTierSuggestion
+}
+
+type McpPreset {
+  serverUrl: String!
+  authMode: String!
+  oauthScopes: String
 }
 
 type McpTierSuggestion {
@@ -2135,6 +2195,7 @@ type MemoryEntry {
   updatedAt: String!
   ownerName: String
   createdByName: String
+  autoApproved: Boolean!
 }
 
 type MemoryExport {
@@ -2903,6 +2964,22 @@ type ResearchProviderOption {
   maxCostUsd: Float
 }
 
+type ResearchTier {
+  provider: WebProvider!
+  tierId: String!
+  label: String!
+  priceKind: ResearchPriceKind!
+  usd: Float
+  defaultUsd: Float
+  minUsd: Float
+  maxUsd: Float
+  defaultMaxCredits: Int
+  typicalDuration: String!
+  deadlineMinutes: Int!
+  goodFor: String!
+  maxDurationSeconds: Int
+}
+
 type Role {
   roleId: Long!
   name: String!
@@ -3223,6 +3300,8 @@ type TaskMutations {
   taskPageTicket(taskId: Long!, revisionId: String!): String
   "Preview unsaved task-page HTML: a single-use, 60-second link that renders the given HTML in the same sandbox as a saved page. Nothing is stored."
   taskPageDraftTicket(taskId: Long!, html: String!): String
+  "Call an endpoint as the signed-in person, on behalf of a task page that is granted it. pageId is the HTML page's revisionId; body is JSON text. The grant comes from the task, never from the page. Used by the Honeybase app's page bridge; API keys are refused."
+  callTaskPageEndpoint(taskId: Long!, pageId: String!, endpointId: String!, body: String, confirmed: Boolean): TaskPageEndpointResult
   "Create a new task"
   createTask(task: WorkflowTaskInput!): WorkflowTask
   "Create a new task with user or team-based assignment. Provide userId for direct assignment or teamId for random team member assignment."
@@ -3269,6 +3348,25 @@ type TaskMutations {
   batchAppendTaskNotes(taskIds: [Long!]!, text: String!): [WorkflowTask!]
   "Delete many tasks at once. Returns the number deleted."
   batchDeleteTasks(taskIds: [Long!]!): Int
+}
+
+type TaskPageEndpointGrant {
+  endpointId: String!
+  confirm: Boolean
+  pin: String
+  name: String
+}
+
+type TaskPageEndpointResult {
+  status: Int!
+  body: String
+  contentType: String
+  code: String
+}
+
+type TaskPageGrants {
+  endpoints: [TaskPageEndpointGrant!]
+  publicNetwork: Boolean
 }
 
 type TaskPageSource {
