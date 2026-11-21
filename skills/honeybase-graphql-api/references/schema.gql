@@ -1014,6 +1014,7 @@ type App {
   createdBy: Long
   createdAt: String!
   updatedAt: String!
+  publicAccess: Boolean!
 }
 
 type AppAgent {
@@ -1052,6 +1053,7 @@ type AppData {
   files: [AppFileSummary!]!
   agents: [AppAgent!]!
   endpoints: [AppEndpoint!]!
+  publicAccessRefusal: String
 }
 
 type AppEndpoint {
@@ -1063,6 +1065,7 @@ type AppEndpoint {
   released: Boolean!
   paused: Boolean!
   createdAt: String!
+  audience: String!
 }
 
 type AppFile {
@@ -1110,7 +1113,9 @@ type AppMutations {
   "Replace the agents this app may invoke. Requires canManageReleases, not just build access: every user of the app can then spend the organization's AI budget through them"
   setAppAgents(publicId: String!, "The COMPLETE list of agents this app may invoke. Anything omitted is undeclared" agentPublicIds: [String!]!): [AppAgent!]
   "Replace the endpoints this app may invoke. Requires canManageReleases and canBuildWorkflows: declaring is a grant, and only someone who may run an endpoint may hand it to an app"
-  setAppEndpoints(publicId: String!, "The COMPLETE list of endpoints (process public ids) this app may invoke. Anything omitted is undeclared, and an app session calling an undeclared endpoint is refused with 403 app_endpoint_not_declared" processPublicIds: [String!]!): [AppEndpoint!]
+  setAppEndpoints(publicId: String!, "The COMPLETE list of endpoints (process public ids) this app may invoke. Anything omitted is undeclared, and an app session calling an undeclared endpoint is refused with 403 app_endpoint_not_declared" processPublicIds: [String!]!, "Which of processPublicIds a signed-out visitor of the app may call when the app is public (audience public); the rest are members-only. Must be a subset of processPublicIds. Omitted: every still-declared endpoint keeps its current audience" publicProcessPublicIds: [String!]): [AppEndpoint!]
+  "Make an app public or private. Public: anyone with the link may open its RELEASE (never the draft) and call the endpoints it declares with audience public; members-only endpoints answer 403 app_endpoint_members_only to them. Requires canManageReleases and canBuildWorkflows, and turning it on requires a paid plan (not a trial). Takes effect on the next request"
+  setAppPublicAccess(publicId: String!, enabled: Boolean!): App
 }
 
 type AppQueries {
