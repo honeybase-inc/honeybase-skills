@@ -130,6 +130,15 @@ enum RunDirection {
   Forward
 }
 
+enum UsageKind {
+  Agent
+  BrowserLogin
+  Chart
+  DashboardFilter
+  WebDefault
+  Workflow
+}
+
 enum WebProvider {
   Browserbase
   Exa
@@ -275,6 +284,7 @@ input ProcessSettingsInput {
   onFailureEmail: String
   onFailureNotifyUserIds: [Long!]!
   onFailureNotifyTeamIds: [Long!]!
+  consecutiveFailureLimit: Int
 }
 
 input RunNodeGqlInput {
@@ -1346,6 +1356,21 @@ type BillingSeatMember {
   isExternal: Boolean!
 }
 
+type BillingStorageUsage {
+  usedBytes: Long!
+  keptBytes: Long!
+  capBytes: Long!
+  expiringBytes: Long!
+  heldBytes: Long!
+}
+
+type BreakerPause {
+  processId: Long!
+  processPublicId: String!
+  reason: String!
+  pausedAt: String
+}
+
 type BrowserApprovalDetails {
   provider: String!
   payer: String!
@@ -1797,6 +1822,57 @@ type EnvironmentQueries {
   enabled: Boolean
 }
 
+type FileBatchResultGql {
+  publicId: String!
+  "The file after the action; absent when it was refused"
+  file: LibraryFile
+  "Why this file was refused"
+  error: String
+}
+
+type FileHistoryEntry {
+  kind: String!
+  at: String!
+  actor: ActivityActor!
+  from: String
+  to: String
+}
+
+type FileMutations {
+  "Keep a file past its 30-day expiry, or unkeep it. Anyone who can see it; form uploads live with their response and cannot be kept; refused while storage is full."
+  keepFile(publicId: String!, "false unkeeps (default true)" keep: Boolean): LibraryFile
+  "File it in a Files folder, or Unfiled. Anyone who can see it."
+  moveFile(publicId: String!, "A Files folder; absent moves the file to Unfiled" folderId: Long): LibraryFile
+  "Rename it in the library (run history and tasks keep the original name). Anyone who can see it."
+  renameFile(publicId: String!, "The library name; blank restores the original" name: String!): LibraryFile
+  "Delete a file for good: its creator or an owner or admin. Refused while a task carries it, and for a form upload (delete the response)."
+  deleteFile(publicId: String!): LibraryFile
+  "Keep or unkeep many files (at most 100); each answers on its own."
+  keepFiles(publicIds: [String!]!, "false unkeeps (default true)" keep: Boolean): [FileBatchResultGql!]
+  "File many files in a Files folder, or Unfiled (at most 100); each answers on its own."
+  moveFiles(publicIds: [String!]!, "A Files folder; absent moves them to Unfiled" folderId: Long): [FileBatchResultGql!]
+  "Delete many files for good (at most 100); each answers on its own, under deleteFile's rules."
+  deleteFiles(publicIds: [String!]!): [FileBatchResultGql!]
+  "Add a file you just uploaded to the library: kept, in the folder given. Builders and above (Build workflows, or an owner or admin)."
+  addFile("A committed upload of yours (requestWorkflowFileUploadUrl, then commitWorkflowFileUpload)" publicId: String!, "A Files folder; absent leaves it Unfiled" folderId: Long): LibraryFile
+}
+
+type FilePageGql {
+  files: [LibraryFile!]!
+  nextCursor: String
+  "Matching files in all, when paging by number"
+  total: Long
+}
+
+type FileQueries {
+  "The organization's files you may see, newest first, both ledgers (workflow files and form uploads), with where each came from and its library state. Any member."
+  files("Substring of the file's name (case-insensitive)" query: String, "image, pdf, spreadsheet, document or other" kind: String, "Has this source: run, agent, task, form, conversation, mcp or upload" source: String, "Only files in this Files folder" folderId: Long, "Only files in no folder" unfiled: Boolean, "true: only kept files; false: only files not kept" kept: Boolean, "Created at or after (ISO-8601 date or instant)" since: String, "Created before (ISO-8601 date or instant)" until: String, "Page size, at most 50 (the default)" limit: Int, "The previous page's nextCursor. It pages the default order only (added, newest first); page another order with page" cursor: String, "Order: added (default), updated, size, name or expires" sort: String, "Descending (default: true, false for name). expires ascending lists the soonest to go first" descending: Boolean, "Page by number from 1 (the Files table); returns total and no cursor" page: Int, "Rows per numbered page: 25 (default), 50 or 100" pageSize: Int): FilePageGql
+  "One file of the library, if you may see it."
+  file(publicId: String!): LibraryFile
+  "A file's library history, newest first: uploaded, kept, unkept, moved, renamed, with who and when. Only for a file you may see."
+  history(publicId: String!): [FileHistoryEntry!]
+}
+
 type Folder {
   folderId: Long!
   organizationId: Long!
@@ -1952,6 +2028,10 @@ type IntegrationMutations {
 }
 
 type IntegrationQueries {
+  "Current and historical uses of an integration; only current uses block deletion"
+  integrationUsages(integrationId: Long!): IntegrationUsagesView
+  "Current usage counts by integration and kind for this organization"
+  integrationUsageCounts: [IntegrationUsageCount!]
   "Apps with trusted connection presets and matching integrations in the current organization; matching rows may still need authorization"
   connectableApps: [ConnectableApp!]!
   "List all integrations in the current organization"
@@ -1983,6 +2063,33 @@ type IntegrationQueries {
   sqlIntegrationSchema(integrationId: Long!): OrgDbSchema
   "A saved browser login's state: status, who logged in and when, last use, and whether a browser session is using it now (requires canManageIntegrations). Never the browser profile itself"
   browserLogin(integrationId: Long!): BrowserLoginInfo
+}
+
+type IntegrationUsageCount {
+  integrationId: Long!
+  kind: UsageKind!
+  count: Int!
+}
+
+type IntegrationUsageVersionView {
+  draft: Boolean!
+  major: Int
+  minor: Int
+}
+
+type IntegrationUsageView {
+  kind: UsageKind!
+  id: Long!
+  publicId: String!
+  name: String!
+  detail: String!
+  versions: [IntegrationUsageVersionView!]!
+  viaApps: [String!]!
+}
+
+type IntegrationUsagesView {
+  current: [IntegrationUsageView!]!
+  history: [IntegrationUsageView!]!
 }
 
 type InvitationPreview {
@@ -2045,6 +2152,35 @@ type KVStringString {
   key: String!
   "Value"
   value: String!
+}
+
+type LibraryFile {
+  ref: WorkflowFileRef!
+  originalName: String!
+  kind: String!
+  sourceKind: String!
+  createdAt: String!
+  updatedAt: String!
+  createdByName: String
+  processName: String
+  processPublicId: String
+  runWorkflowId: Long
+  nodeName: String
+  agentName: String
+  agentPublicId: String
+  agentRunId: Long
+  taskCount: Int!
+  taskName: String
+  taskPublicId: String
+  formName: String
+  formPublicId: String
+  conversationName: String
+  chatId: Long
+  keptAt: String
+  keptByName: String
+  folderId: Long
+  expiresAt: String
+  mayDelete: Boolean!
 }
 
 type McpConnectionDetail {
@@ -2318,6 +2454,8 @@ type Mutations {
   memory: MemoryMutations!
   "Skill mutations"
   skills: SkillMutations!
+  "File library mutations: keep, move, rename, delete"
+  files: FileMutations!
 }
 
 type MyWorkSummary {
@@ -2611,6 +2749,7 @@ type OrganizationPlan {
   creditsAdded: BillingCreditsAdded
   continuesUntil: ZonedDateTime
   creditsUsage: BillingCreditsUsage
+  storageUsage: BillingStorageUsage
   portalAvailable: Boolean!
 }
 
@@ -2707,6 +2846,7 @@ type PlanLimits {
   monthlyRuns: Long
   monthlyCredits: Long
   rolloverMultiple: Int!
+  storageBytes: Long
 }
 
 type ProcessAcceptance {
@@ -2778,7 +2918,7 @@ type ProcessMutations {
   cancelRun(runWorkflowId: Long!): Boolean
   "Cancel an in-memory (editor test) run by its run UUID; it stops at the next node boundary. These runs have no run history row, so they cannot be cancelled through cancelRun."
   cancelInMemoryRun(runId: String!): Boolean
-  "Mint a short-lived signed download URL for a file produced by a workflow node. Takes the `id` from the file reference in a node's output. Org-scoped: holding a reference is not authority to read the file, so the URL is minted per request for an authenticated member of the owning organization and is never stored in run state, the run cache, or an AI context."
+  "Mint a short-lived signed download URL for a file produced by a workflow node. Takes the `id` from the file reference in a node's output. Holding a reference is not authority to read the file: the URL is minted per request for a member who may see the file's source (its run, agent run, task, form, conversation or MCP session; the same rule as the `files` library) and is never stored in run state, the run cache, or an AI context."
   workflowFileDownloadUrl(publicId: String!, source: String, inline: Boolean): String
   "Sign a direct browser upload of a file for use in workflows, and record it pending. The browser POSTs the bytes straight to the bucket with the returned fields (the `file` part last) and then calls `commitWorkflowFileUpload` with the returned public id. Requires canBuildWorkflows; the file counts against the organization's storage quota and is reaped on the same 30-day clock as files produced by runs."
   requestWorkflowFileUploadUrl(fileName: String!, contentType: String!, declaredSize: Long!): WorkflowFileUploadTicket
@@ -2797,6 +2937,8 @@ type ProcessQueries {
   scheduledRuns(processId: Long!, status: String, from: String, to: String, first: Int, after: String): ScheduledRunConnection
   "List all processes in the current organization"
   listProcesses: [ProcessData!]
+  "Processes the safety breaker paused (too many failed runs in a row, or a trigger loop) and that are still paused. Unpause with setProcessPaused."
+  listBreakerPauses: [BreakerPause!]
   "Get a specific process by ID"
   getProcess(processId: Long, publicId: String): ProcessData
   "Get a specific workflow by ID with all its nodes and edges"
@@ -2804,7 +2946,7 @@ type ProcessQueries {
   "List the production run history of a process, newest first"
   listProcessRuns(processId: Long!, phase: String, from: String, to: String, limit: Int, offset: Int, includeTestRuns: Boolean): [RunSummary!]
   "Get the full node-by-node detail of a single run"
-  getProcessRun(runWorkflowId: Long!, processId: Long): RunWorkflowDataGql
+  getProcessRun(runWorkflowId: Long!, processId: Long, "Return a light version: every node's timing, status and (capped) error, without inputs, results or logs. Fetch a node's full payload with nodeNames." slim: Boolean, "Return only these nodes (full payloads). Combine with a slim call to load node detail on demand." nodeNames: [String!]): RunWorkflowDataGql
   "Aggregated stats for a process (task counts + recent run metrics) backing the process card tiles"
   getProcessStats(processId: Long!): ProcessStats
   "Run queue tiles: live queued/running + historical completed/failed counts and the configured queue size"
@@ -2819,7 +2961,7 @@ type ProcessQueries {
   endpointPublicAccess(processPublicId: String!): EndpointPublicAccessGql
   "The vendor-side state of each Web Monitor trigger of a process's current release: pending, active, paused or error (with the reason). Empty when the process has none."
   webMonitorStatuses(processId: Long!): [WebMonitorStatus!]
-  "The first 64 KB of a text, CSV or JSON file named by a file reference, for the file viewer. Takes the reference's `publicId` and `source`. The same access as workflowFileDownloadUrl: a member of the owning organization, and for a public form's upload canManageForms. Fails for a file that is not text."
+  "The first 64 KB of a text, CSV or JSON file named by a file reference, for the file viewer. Takes the reference's `publicId` and `source`. The same access as workflowFileDownloadUrl: the file's source decides (its run, agent run, task, form, conversation or MCP session). Fails for a file that is not text."
   workflowFilePreview(publicId: String!, source: String): WorkflowFilePreview
 }
 
@@ -2829,6 +2971,7 @@ type ProcessSettings {
   onFailureEmail: String
   onFailureNotifyUserIds: [Long!]!
   onFailureNotifyTeamIds: [Long!]!
+  consecutiveFailureLimit: Int
 }
 
 type ProcessStats {
@@ -2910,6 +3053,8 @@ type Queries {
   memory: MemoryQueries!
   "Skills: instructions members write or import for Barry and agents"
   skills: SkillQueries!
+  "The file library (Barry Files stage 2): the files you may see, by source, folder and kept state"
+  files: FileQueries!
   "Bounded committed history using current entity read permissions; deleted roots require Owner/Admin"
   entityActivity(entityKind: String!, entityId: Long!, cursor: String, limit: Int): EntityActivityPage
   "Same as entityActivity, addressed by the entity's public ID (UUID). Live entities only; deleted history requires entityActivity with the stable numeric ID"
@@ -3777,6 +3922,14 @@ type WorkflowFilePreview {
   text: String!
   truncated: Boolean!
   totalBytes: Long!
+}
+
+type WorkflowFileRef {
+  id: String!
+  name: String!
+  contentType: String!
+  sizeBytes: Long!
+  source: String!
 }
 
 type WorkflowFileUploadTicket {
