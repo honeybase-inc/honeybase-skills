@@ -154,6 +154,17 @@ input ApiKeyScopesInput {
   maxConcurrency: Int
 }
 
+input BillingUsageFiltersInput {
+  "Honeydrops sources (ai, web_search, web_fetch, browser, sandbox, research, email) or run kinds (workflow, endpoint, agent, tool, poll) to keep."
+  kinds: [String!]
+  "Keep usage attributed to these workflows."
+  processIds: [Long!]
+  "Keep usage attributed to these agents."
+  agentIds: [Long!]
+  "Keep usage whose workflow, agent or person name contains this text (case-insensitive)."
+  search: String
+}
+
 input EmbeddedPageInput {
   name: String!
   url: String!
@@ -1331,12 +1342,16 @@ type BillingPlanOffer {
 }
 
 type BillingQueries {
-  "This organization's plan: kind, status, effective limits and price. Any member may read it; `seatsUsed`, the period and the source are null unless the caller is an Owner or Admin."
+  "This organization's plan: kind, status, effective limits and price. Any member may read it; `seatsUsed`, the period and the source are null unless the caller is an Owner or Admin, and `priceCents` is null and `planOffers`, `runPacks` and `creditPacks` are empty unless the caller has canManageBilling."
   organizationPlan: OrganizationPlan
   "Recent billing activity, newest first: monthly period grants, Runs and Credits purchases, credit grants, and subscription changes (cancellation scheduled or withdrawn, payment failed, suspended for payment, recovered, ended, plan changed). `kind` is one of period_started, runs_purchased, credits_purchased, credits_granted, cancel_scheduled, cancel_withdrawn, ended, suspended, payment_failed, recovered, plan_changed; more kinds may be added. `limit` defaults to 10 (max 50). Requires canManageBilling."
   activity(limit: Int): [BillingActivity!]
   "What a return from hosted Checkout bought and whether it has been fulfilled (a pack once its grant is written, a plan once its first invoice is paid). Null for a session that is unknown or belongs to another organization. Requires canManageBilling."
   checkoutReturn(sessionId: String!): BillingCheckoutReturn
+  "This period's meters as numbers: runs used and the allowance (null allowance = unlimited), Honeydrops used and available (null when the organization has no Honeydrops), and the current and up to two previous billing periods. No prices or packs. Owners, Admins and members with a builder seat (Builder, or a custom role with canManageReleases); others, including API keys, are refused."
+  usageMeters: BillingUsageMeters
+  "Where runs or Honeydrops went in [from, to): grouped rows (largest first), a daily series and the total. When the window is whole billing periods and no filter is set, `total` is the meter for those periods (the same number the Billing card shows) and `notItemized` is the part no row explains yet. Numbers only. Same access as usageMeters."
+  usage("runs or honeydrops." resource: String!, "Window start (inclusive). At most 400 days back; earlier is clamped." from: ZonedDateTime!, "Window end (exclusive). At most 100 days after from." to: ZonedDateTime!, "where (workflow, agent, Barry or MCP per person), source (Honeydrops source, or run trigger) or day." groupBy: String!, filters: BillingUsageFiltersInput): BillingUsageReport
 }
 
 type BillingRunMeter {
@@ -1345,6 +1360,11 @@ type BillingRunMeter {
   used: Long!
   included: Long
   purchasedRemaining: Long!
+  allowance: Long
+}
+
+type BillingRunsUsage {
+  used: Long!
   allowance: Long
 }
 
@@ -1362,6 +1382,54 @@ type BillingStorageUsage {
   capBytes: Long!
   expiringBytes: Long!
   heldBytes: Long!
+}
+
+type BillingUsageDay {
+  day: String!
+  amount: Float!
+}
+
+type BillingUsageMeters {
+  periodStart: ZonedDateTime!
+  periodEnd: ZonedDateTime!
+  runs: BillingRunsUsage!
+  honeydrops: BillingCreditsUsage
+  recentPeriods: [BillingUsagePeriod!]!
+}
+
+type BillingUsagePeriod {
+  start: ZonedDateTime!
+  end: ZonedDateTime!
+}
+
+type BillingUsageReport {
+  resource: String!
+  from: ZonedDateTime!
+  to: ZonedDateTime!
+  groupBy: String!
+  total: Float!
+  itemized: Float!
+  notItemized: Float!
+  meterKnown: Boolean!
+  rows: [BillingUsageRow!]!
+  days: [BillingUsageDay!]!
+  truncated: Boolean!
+  approximate: Boolean!
+}
+
+type BillingUsageRow {
+  key: String!
+  kind: String!
+  label: String
+  processId: Long
+  agentId: Long
+  amount: Float!
+  units: [BillingUsageUnits!]!
+}
+
+type BillingUsageUnits {
+  unitKind: String!
+  units: Float!
 }
 
 type BreakerPause {
