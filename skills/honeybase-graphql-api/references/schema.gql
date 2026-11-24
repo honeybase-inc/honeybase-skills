@@ -2469,6 +2469,8 @@ type MetadataBadge {
 type Mutations {
   "Self-service Stripe billing (canManageBilling)"
   billing: BillingMutations!
+  "Payments: the organization's own Stripe account through Stripe Connect (canManageBilling)"
+  payments: PaymentsMutations!
   "Authentication mutations (login, token refresh)"
   auth: AuthMutations!
   "User management mutations"
@@ -2750,6 +2752,18 @@ type OrgSecret {
   updatedAt: String!
 }
 
+type OrgStripeAccount {
+  status: String!
+  needsInformation: Boolean!
+  linkKind: String!
+  accountId: String!
+  livemode: Boolean!
+  connectedAt: ZonedDateTime!
+  connectedByName: String
+  checkedAt: ZonedDateTime
+  disconnectedAt: ZonedDateTime
+}
+
 type Organization {
   organizationId: Long!
   name: String!
@@ -2878,6 +2892,29 @@ type OrganizeTag {
   scope: String!
   name: String!
   color: String!
+}
+
+type PaymentsMutations {
+  "Create a new Stripe account for this organization (Stripe-hosted onboarding) and return the onboarding URL to open. Requires canManageBilling, a paid plan and no connected account. The account belongs to the organization and has the full Stripe Dashboard."
+  createStripeAccount: String
+  "A fresh Stripe onboarding URL for an account created through Honeybase (each link works once, for a few minutes). Accounts linked from an existing Stripe account are updated in their own Stripe Dashboard instead. Requires canManageBilling."
+  stripeOnboardingLink: String
+  "Read the connected account's readiness from Stripe now and return the updated settings. Requires canManageBilling."
+  refreshStripeAccount: PaymentsSettings
+  "Disconnect the organization's Stripe account: Honeybase loses access to it. The account stays the organization's, with its payouts, customers and subscriptions; nothing in it is changed or cancelled. Requires canManageBilling."
+  disconnectStripeAccount: PaymentsSettings
+}
+
+type PaymentsQueries {
+  "Payments settings: whether Stripe can be connected now (and why not), and the organization's connected Stripe account with its readiness. `account.status` is one of ready, reviewing, needs_information, disconnected; only `ready` can take card payments. Null unless the caller has canManageBilling."
+  settings: PaymentsSettings
+}
+
+type PaymentsSettings {
+  available: Boolean!
+  unavailableReason: String
+  createCountries: [String!]!
+  account: OrgStripeAccount
 }
 
 type Permissions {
@@ -3090,6 +3127,8 @@ type Queries {
   environment: EnvironmentQueries!
   "Billing queries: the organization's plan"
   billing: BillingQueries!
+  "Payments queries: the organization's connected Stripe account (canManageBilling)"
+  payments: PaymentsQueries!
   "Job schedule queries"
   schedules: ScheduleQueries!
   "Availability (control panel) queries"
