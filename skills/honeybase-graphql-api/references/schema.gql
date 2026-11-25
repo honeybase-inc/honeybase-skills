@@ -298,6 +298,20 @@ input ProcessSettingsInput {
   consecutiveFailureLimit: Int
 }
 
+input ResearchOptionsInput {
+  providers: [ResearchProviderOptionInput!]!
+  defaultProvider: WebProvider
+  contactEnrichment: Boolean
+}
+
+input ResearchProviderOptionInput {
+  provider: WebProvider!
+  integrationId: Long
+  allowedTiers: [String!]!
+  defaultTier: String
+  maxCostUsd: Float
+}
+
 input RunNodeGqlInput {
   runNodeId: Long!
   runWorkflowId: Long!
@@ -920,8 +934,10 @@ type AiChatMutations {
   sendChatMessage(chatId: Long!, content: String!, "Workflow chats: the current canvas graph — becomes the chat's working graph" workflowData: WorkflowDataGqlInput, "Agent chats: the builder form's AgentDraftSnapshot JSON — becomes the chat's working draft" agentDraft: String, "App chats: the editor's AppDraftSnapshot JSON — a MANIFEST of the draft (identity, content digest, paths and sizes), never file contents. App files live in app_file and Barry writes them through AppService directly, so there is no working copy to carry" appSnapshot: String, "Home chats: the HomeSnapshot JSON (the organization the chat is scoped to)" homeContext: String, "Task-feedback chats: the TaskFeedbackSnapshot JSON (the agent session the interview is about)" taskFeedbackContext: String, "Barry threads focused on a dashboard: the DashboardSnapshot JSON ({dashboardPublicId, version, editing, pendingOps})" dashboardSnapshot: String, "Barry threads focused on the chart editor: the ChartDraftSnapshot JSON (the editor's unsaved draft)" chartDraft: String, "The AI connection this turn runs on. Omit (with model) to keep the chat's current one, or -- on a chat that has none -- to run on the organization's default AI connection: the Honeybase AI credits connection, else its only enabled AI connection. That is how a member who cannot list connections still sends." integrationId: Long, "The model for this turn. Omit to keep the chat's current one, or to use the connection's default model." model: String, "Public ids of already-uploaded workflow files to attach to this message (pasted images). Ids only: the server rebuilds each reference from its own row, so a name, type or size claimed by the client is never believed. Capped per message and by total bytes; every attachment is replayed on each subsequent turn of the chat." files: [String!]!, "Barry threads only: the editor this message is sent from - workflow | agent | app | task_feedback | dashboard | chart - with focusId. Its snapshot rides in the matching argument above (workflowData, agentDraft, appSnapshot, taskFeedbackContext, dashboardSnapshot, chartDraft); with no focus, send homeContext." focusKind: String, "Barry threads only: the focused editor's subject id (process id, agent id, app id, agent session id, or the focusId of a dashboard or chart; 0 for a new chart)." focusId: Long, "Barry threads only: a SurfaceInput JSON saying where the user is ({page, objectKind?, objectId?, selection?, filters?}). Structure only: the server resolves every name under your own permissions and builds the note Barry reads from it." surface: String): Boolean
   "Stop the in-flight copilot turn"
   cancelChatTurn(chatId: Long!): Boolean
+  "Stop a running deep research job (web_research) of this conversation at its provider. It settles like any job (the provider may still bill what it used) and the copilot hears it was cancelled. False when it already ended."
+  cancelChatResearch(chatId: Long!, researchId: String!): Boolean
   "Approve or reject a pending tool call; with alwaysAllow, also grant it a standing approval"
-  respondToToolCall(chatId: Long!, toolCallId: String!, approved: Boolean!, "Rejections only: an optional free-text reply the copilot sees verbatim (it may carry the content you actually want, e.g. a corrected form schema). Capped server-side." note: String, "Approvals only: also record a standing approval (\"Approve always\") for this tool, so matching future calls in any of your chats proceed without a card. Personal, revocable (revokeApprovalGrant), never widens permissions - the call still runs under your own rights. On a release (release_workflow, release_agent, release_app) the standing approval covers only that one process, agent or app. Ignored on rejections; refused on cards that ask you for something (input requests and the approvals card itself, manage_approval_grants) and on a release whose target cannot be resolved." alwaysAllow: Boolean, "Input-request cards only: an InputClaim JSON saying what the user created (e.g. {\"Integration\":{\"integrationId\":42}}). It is a POINTER, never a fact and never tool arguments — the server re-reads what it points at under your own permissions and builds the copilot's result from what it finds, so a forged or cross-organization id yields an 'unavailable' result rather than anything the model believes." inputClaim: String, "Question cards (ask_user) only: an AskUserResponse JSON - {\"Answered\":{\"answers\":[{\"id\":\"email\",\"value\":{\"Text\":{\"value\":\"a@b.co\"}}}]}}, {\"FreeText\":{\"text\":\"...\"}}, {\"Asked\":{\"text\":\"...\"}} or {\"Declined\":{}}. Validated against the questions stored on that card; an answer that does not fit, or one sent to a card that asks nothing, is refused. Send approved=true with Answered or FreeText." answers: String): Boolean
+  respondToToolCall(chatId: Long!, toolCallId: String!, approved: Boolean!, "Rejections only: an optional free-text reply the copilot sees verbatim (it may carry the content you actually want, e.g. a corrected form schema). Capped server-side." note: String, "Approvals only: also record a standing approval (\"Approve always\") for this tool, so matching future calls in any of your chats proceed without a card. Personal, revocable (revokeApprovalGrant), never widens permissions - the call still runs under your own rights. On a release (release_workflow, release_agent, release_app) the standing approval covers only that one process, agent or app. Ignored on rejections; refused on cards that ask you for something (input requests and the approvals card itself, manage_approval_grants) and on a release whose target cannot be resolved." alwaysAllow: Boolean, "Input-request cards only: an InputClaim JSON saying what the user created (e.g. {\"Integration\":{\"integrationId\":42}}). It is a POINTER, never a fact and never tool arguments — the server re-reads what it points at under your own permissions and builds the copilot's result from what it finds, so a forged or cross-organization id yields an 'unavailable' result rather than anything the model believes." inputClaim: String, "Question cards (ask_user) only: an AskUserResponse JSON - {\"Answered\":{\"answers\":[{\"id\":\"email\",\"value\":{\"Text\":{\"value\":\"a@b.co\"}}}]}}, {\"FreeText\":{\"text\":\"...\"}}, {\"Asked\":{\"text\":\"...\"}} or {\"Declined\":{}}. Validated against the questions stored on that card; an answer that does not fit, or one sent to a card that asks nothing, is refused. Send approved=true with Answered or FreeText." answers: String, "Deep research price cards (web_research) only, with approved=true: the provider, tier or cost cap the user picked instead, as JSON with only the keys provider, tier and max_cost_usd, e.g. {\"provider\":\"exa\",\"tier\":\"high\"}. Re-validated against the organization's allowed providers and tiers before the research starts. Refused on every other card: no other tool call ever runs with edited arguments." editedArgs: String): Boolean
   "Removed: the one-click undo of a copilot write no longer exists. Always fails; ask the copilot to put the change back instead (its receipt in the chat says what it was before)."
   undoToolCall(chatId: Long!, "Ignored: the mutation always refuses (undo was removed)." toolCallId: String!): Boolean @deprecated(reason: "Undo was removed (Barry Harness Phase 0). Ask the copilot to put a change back.")
   "Update a chat's settings (mode, tool-call limit, model, connections Barry may not read in this chat)"
@@ -2802,7 +2818,7 @@ type OrganizationMutations {
   "Rename the current organization. Requires Owner or Admin role."
   renameOrganization(name: String!): Boolean
   "Set the organization's web defaults (all three entries; null = the Honeybase default). Requires Owner or Admin role. Each entry is checked: a provider the tool supports, and a connection of this organization, of the provider's type, enabled and with a key. Existing agents keep their saved tool settings."
-  setWebDefaults(search: WebToolDefaultInput, fetch: WebToolDefaultInput, interact: WebToolDefaultInput): OrganizationWebDefaults
+  setWebDefaults(search: WebToolDefaultInput, fetch: WebToolDefaultInput, interact: WebToolDefaultInput, "Deep research for Barry and MCP. Omitted or null: keep what is stored. An empty providers list clears it (every enabled research connection is used)." webResearch: ResearchOptionsInput): OrganizationWebDefaults
   "Set the organization's run_code setting. Requires Owner or Admin role. Domains are checked like a Run In Environment node's (a host or *.host, at least one at Domains). Existing agents keep their own run_code setting."
   setCodeDefaults(network: NetworkLevel!, allowedDomains: [String!]!, packageRegistries: Boolean!): OrganizationCodeDefaults
 }
@@ -2849,6 +2865,8 @@ type OrganizationWebDefaults {
   search: WebToolDefault
   fetch: WebToolDefault
   interact: WebToolDefault
+  "Deep research (web_research) for Barry and MCP: the providers, connections, tiers and caps it may use. Null: every enabled Exa, Parallel or Firecrawl connection, all tiers. Research always runs on the organization's own provider account."
+  webResearch: ResearchOptions
   "Whether the caller may change them (Owner or Admin role)"
   canEdit: Boolean!
 }
