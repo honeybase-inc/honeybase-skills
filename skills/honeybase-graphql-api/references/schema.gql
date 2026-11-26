@@ -612,6 +612,10 @@ type AgentMutations {
   openBrowserHandoff(handoffId: String!): BrowserHandoffOpen
   "End a browser handoff: cleared = true when the page is clear (the agent continues in the same browser), false when it cannot be cleared. Same permissions as openBrowserHandoff."
   finishBrowserHandoff(handoffId: String!, cleared: Boolean!): Boolean
+  "A browser handoff's state and its tabs, each with its own live view URL (a sign-in popup is a tab of its own, listed last). Same permissions as openBrowserHandoff. Each live view URL controls the browser: never share it"
+  browserHandoffTabs(handoffId: String!): BrowserLiveView
+  "Type text into the field that has focus in one tab of a browser handoff, as one input (for a pasted password, or a keyboard layout the live view gets wrong). Only into an https page. Same permissions as openBrowserHandoff; the text is never stored or logged"
+  typeIntoBrowserHandoff(handoffId: String!, "The tab, as browserHandoffTabs lists it" tabId: String!, "What to type into the field that has focus in that tab (at most 1000 characters). Never stored or logged" text: String!): Boolean
   "Close the caller's test session; the next turn starts fresh"
   resetTestSession(agentId: Long!): Boolean
   "Generate or rotate the agent's external API key (the credential for its per-agent MCP endpoint). Returns the plaintext key ONCE; rotating invalidates the previous key immediately. Requires a released version."
@@ -690,6 +694,8 @@ type AgentRun {
   initiatedByWebUserId: Long
   appId: Long
   costEstimated: Boolean!
+  researchWaiting: Boolean!
+  codeWaiting: Boolean!
 }
 
 type AgentRunChildSummary {
@@ -1091,6 +1097,7 @@ type AppData {
   agents: [AppAgent!]!
   endpoints: [AppEndpoint!]!
   publicAccessRefusal: String
+  releaseBlockingEndpoints: [AppReleaseEndpoint!]!
 }
 
 type AppEndpoint {
@@ -1103,6 +1110,7 @@ type AppEndpoint {
   paused: Boolean!
   createdAt: String!
   audience: String!
+  runsDraftInPreview: Boolean!
 }
 
 type AppFile {
@@ -1166,6 +1174,11 @@ type AppQueries {
   getAppBuild(publicId: String!): AppBuild
   "Recent builds of an app, newest first"
   listAppBuilds(publicId: String!): [AppBuild!]
+}
+
+type AppReleaseEndpoint {
+  publicId: String!
+  name: String!
 }
 
 type AppSubscriptions {
@@ -1479,6 +1492,20 @@ type BrowserHandoffDetails {
 type BrowserHandoffOpen {
   liveViewUrl: String!
   expiresAtMillis: Long!
+}
+
+type BrowserLiveTab {
+  tabId: String!
+  title: String!
+  host: String!
+  liveViewUrl: String!
+}
+
+type BrowserLiveView {
+  running: Boolean!
+  endedReason: String
+  tabs: [BrowserLiveTab!]!
+  serverNowMillis: Long!
 }
 
 type BrowserLoginApproval {
@@ -2107,6 +2134,10 @@ type IntegrationMutations {
   finishBrowserLogin(loginId: String!): BrowserLoginInfo
   "Close a login session without marking the login active. What happened in the browser is still saved"
   cancelBrowserLogin(loginId: String!): Boolean
+  "A login session's state and its tabs, each with its own live view URL (a sign-in popup is a tab of its own, listed last). For the person who started it only. Each live view URL controls the browser: never share it"
+  browserLoginView(loginId: String!): BrowserLiveView
+  "Type text into the field that has focus in one tab of a login session, as one input (for a pasted password, or a keyboard layout the live view gets wrong). Only into an https page. For the person who started it only; the text is never stored or logged"
+  typeIntoBrowserLogin(loginId: String!, "The tab, as browserLoginView lists it" tabId: String!, "What to type into the field that has focus in that tab (at most 1000 characters). Never stored or logged" text: String!): Boolean
   "Store, change or clear a saved login's portal credentials (username, password, authenticator key), which Honeybase types into the site when the login is signed out. Write-only: the answer says only whether each is set. A person in the app only (requires canManageIntegrations; not available to API keys)"
   setBrowserLoginCredentials(integrationId: Long!, "The portal username. The unchanged marker __HONEYBASE_SECRET_UNCHANGED__ keeps the stored value; an empty string removes it" username: String!, "The portal password. The unchanged marker keeps the stored value; an empty string removes it" password: String!, "The authenticator (TOTP) setup key, as Base32 or an otpauth://totp/ link. The unchanged marker keeps the stored value; an empty string removes it" totpKey: String!, "The person confirms they understand that Honeybase will store the credentials and type them into the site, and that a stored authenticator key turns the second factor into a second password. Required whenever anything is stored" consent: Boolean!): BrowserLoginInfo
 }
@@ -3342,6 +3373,7 @@ type RunWorkflow {
   customPayload: String
   webhookEventId: Long
   skipReason: String
+  testOrigin: String
 }
 
 type RunWorkflowDataGql {
