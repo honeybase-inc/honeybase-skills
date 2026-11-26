@@ -1163,7 +1163,14 @@ type AppMutations {
   setAppPublicAccess(publicId: String!, enabled: Boolean!): App
 }
 
+type AppOpenDay {
+  day: String!
+  opens: Long!
+}
+
 type AppQueries {
+  "Aggregate opens for the last 30 UTC days and last opened time; page loads, including reloads and live previews, not unique people. Organization members only."
+  getAppUsage(publicId: String!): AppUsage
   "List the organization's apps"
   listApps: [App!]
   "One app with its draft, current release, both origins and the draft's file list (paths and sizes, not contents)"
@@ -1184,6 +1191,11 @@ type AppReleaseEndpoint {
 type AppSubscriptions {
   "Stream a build's row until it reaches a terminal state (succeeded or failed)"
   watchAppBuild(publicId: String!): [AppBuild!]
+}
+
+type AppUsage {
+  days: [AppOpenDay!]!
+  lastOpenedAt: String
 }
 
 type AppVersion {
