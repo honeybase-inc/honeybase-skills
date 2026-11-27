@@ -7,6 +7,12 @@ scalar Long
 "A date-time with a time-zone in the ISO-8601 calendar system using the format 1970-01-01T00:00:00Z[UTC]"
 scalar ZonedDateTime
 
+enum AiHostingPolicy {
+  AnyHost
+  NoTraining
+  ZeroDataRetention
+}
+
 enum AppCategory {
   Crm
   CustomerSupport
@@ -172,6 +178,8 @@ input EmbeddedPageInput {
   sizeBytes: Int
   sha256: String
   grants: TaskPageGrantsInput
+  app: TaskPageAppInput
+  pageId: String
 }
 
 input FormSubmissionInput {
@@ -359,6 +367,18 @@ input TaskFormInput {
   presentation: String
 }
 
+input TaskPageAppInput {
+  appId: String!
+  path: String
+  params: [TaskPageAppParamInput!]
+  name: String
+}
+
+input TaskPageAppParamInput {
+  key: String!
+  value: String!
+}
+
 input TaskPageEndpointGrantInput {
   endpointId: String!
   confirm: Boolean
@@ -378,6 +398,8 @@ input TaskPageInput {
   revisionId: String
   grants: TaskPageGrantsInput
   previousRevisionId: String
+  app: TaskPageAppInput
+  pageId: String
 }
 
 input TaskViewColumnInput {
@@ -1058,6 +1080,7 @@ type App {
   createdAt: String!
   updatedAt: String!
   publicAccess: Boolean!
+  embedMode: String!
 }
 
 type AppAgent {
@@ -1098,6 +1121,7 @@ type AppData {
   endpoints: [AppEndpoint!]!
   publicAccessRefusal: String
   releaseBlockingEndpoints: [AppReleaseEndpoint!]!
+  embedRefusal: String
 }
 
 type AppEndpoint {
@@ -1150,7 +1174,9 @@ type AppMutations {
   "Move one file within the app's draft"
   renameAppFile(publicId: String!, from: String!, to: String!): AppFile
   "Release the draft: stamp it, point the app at it, and clone a fresh draft. Refused unless the draft matches a build that succeeded"
-  releaseApp(publicId: String!): AppData
+  releaseApp(publicId: String!, "Optional: also set where the release runs (standalone, embed or both)" embedMode: String): AppData
+  "Upgrade and release: rebuild the LIVE release's source on the current template and make that build the release when it succeeds. The draft is not touched. Returns the queued build (watch it with subscriptions.apps.watchAppBuild), or upgraded=false when the release is already current. Requires canManageReleases and canBuildWorkflows"
+  upgradeAppRelease(publicId: String!, "Optional: also set where the release runs (standalone, embed or both)" embedMode: String): AppUpgradeResult
   "Queue a build of the app's draft and return its row immediately. Watch it with subscriptions.apps.watchAppBuild"
   startAppBuild(publicId: String!): AppBuild
   "Mint a single-use, short-lived ticket that signs the caller in to one of their app's origins. The app never sees the Honeybase session"
@@ -1161,6 +1187,8 @@ type AppMutations {
   setAppEndpoints(publicId: String!, "The COMPLETE list of endpoints (process public ids) this app may invoke. Anything omitted is undeclared, and an app session calling an undeclared endpoint is refused with 403 app_endpoint_not_declared" processPublicIds: [String!]!, "Which of processPublicIds a signed-out visitor of the app may call when the app is public (audience public); the rest are members-only. Must be a subset of processPublicIds. Omitted: every still-declared endpoint keeps its current audience" publicProcessPublicIds: [String!]): [AppEndpoint!]
   "Make an app public or private. Public: anyone with the link may open its RELEASE (never the draft) and call the endpoints it declares with audience public; members-only endpoints answer 403 app_endpoint_members_only to them. Requires canManageReleases and canBuildWorkflows, and turning it on requires a paid plan (not a trial). Takes effect on the next request"
   setAppPublicAccess(publicId: String!, enabled: Boolean!): App
+  "Where the app's release runs: standalone (its own origin), embed (only as a page on tasks) or both. Requires canManageReleases. An embed-only app can not be public"
+  setAppEmbedMode(publicId: String!, "standalone, embed or both" mode: String!): App
 }
 
 type AppOpenDay {
@@ -1173,6 +1201,8 @@ type AppQueries {
   getAppUsage(publicId: String!): AppUsage
   "List the organization's apps"
   listApps: [App!]
+  "The apps a task page can show, each with why it cannot be shown yet (refusal) or none when it can"
+  taskPageApps: [TaskPageAppChoice!]
   "One app with its draft, current release, both origins and the draft's file list (paths and sizes, not contents)"
   getApp(publicId: String!): AppData
   "Read one file from the app's DRAFT. A released version's files are not addressable"
@@ -1191,6 +1221,13 @@ type AppReleaseEndpoint {
 type AppSubscriptions {
   "Stream a build's row until it reaches a terminal state (succeeded or failed)"
   watchAppBuild(publicId: String!): [AppBuild!]
+}
+
+type AppUpgradeResult {
+  upgraded: Boolean!
+  released: Boolean!
+  build: AppBuild
+  message: String!
 }
 
 type AppUsage {
@@ -1888,6 +1925,8 @@ type EmbeddedPage {
   sizeBytes: Int
   sha256: String
   grants: TaskPageGrants
+  app: TaskPageApp
+  pageId: String
 }
 
 type EndpointMutations {
@@ -2829,6 +2868,13 @@ type Organization {
   timezone: String!
 }
 
+"The organization's Honeydrops AI hosting policy and whether this deployment enables it."
+type OrganizationAiHosting {
+  policy: AiHostingPolicy!
+  enabled: Boolean!
+  canEdit: Boolean!
+}
+
 "Organization run_code setting. network None with packageRegistries false is the default: no internet."
 type OrganizationCodeDefaults {
   network: NetworkLevel!
@@ -2864,6 +2910,8 @@ type OrganizationMutations {
   setWebDefaults(search: WebToolDefaultInput, fetch: WebToolDefaultInput, interact: WebToolDefaultInput, "Deep research for Barry and MCP. Omitted or null: keep what is stored. An empty providers list clears it (every enabled research connection is used)." webResearch: ResearchOptionsInput): OrganizationWebDefaults
   "Set the organization's run_code setting. Requires Owner or Admin role. Domains are checked like a Run In Environment node's (a host or *.host, at least one at Domains). Existing agents keep their own run_code setting."
   setCodeDefaults(network: NetworkLevel!, allowedDomains: [String!]!, packageRegistries: Boolean!): OrganizationCodeDefaults
+  "Set the Honeydrops AI hosting policy. Requires Owner or Admin role; API keys cannot write it. Applies to later inference calls, including existing agents and workflows."
+  setAiHostingPolicy(policy: AiHostingPolicy!): OrganizationAiHosting
 }
 
 type OrganizationPlan {
@@ -2901,6 +2949,8 @@ type OrganizationQueries {
   webDefaults: OrganizationWebDefaults
   "The organization's run_code setting: what code Barry and MCP clients run may reach, and what a newly attached agent run_code tool starts with. A run with no internet and no package installs runs without asking; any other setting asks first (a standing approval can cover it). Readable by any authenticated caller of the organization."
   codeDefaults: OrganizationCodeDefaults
+  "Honeydrops AI hosting policy; BYOK connections are unaffected. Missing stored setting defaults to ZeroDataRetention."
+  aiHosting: OrganizationAiHosting
 }
 
 "Organization web defaults. A null entry means that tool's Honeybase default: Exa search, Firecrawl fetch, Browserbase interaction, all paid by Honeybase."
@@ -3015,6 +3065,38 @@ type PlanLimits {
   storageBytes: Long
 }
 
+type PollIntervalOption {
+  seconds: Int!
+  monthlyRuns: Long!
+  allowed: Boolean!
+}
+
+type PollScheduleCost {
+  valid: Boolean!
+  error: String
+  shortestGapSeconds: Int
+  monthlyRuns: Long!
+  allowed: Boolean!
+  minimumSeconds: Int!
+}
+
+type PollTriggerStatus {
+  nodeName: String!
+  state: String!
+  lastCheckAt: String
+  nextCheckAt: String
+  lastOutcome: String
+  lastNewRows: Int!
+  lastError: String
+  lastCheckMs: Int
+  effectiveIntervalSeconds: Int!
+  slowedReason: String
+  pausedReason: String
+  consecutiveFailures: Int!
+  consecutiveOverruns: Int!
+  draining: Boolean!
+}
+
 type ProcessAcceptance {
   processId: Long!
   accepting: Boolean!
@@ -3066,6 +3148,10 @@ type ProcessMutations {
   updateEndpointContract(processId: Long!, contract: String): ProcessData
   "Set the paused state of a process"
   setProcessPaused(processId: Long!, paused: Boolean!): ProcessData
+  "Resume a 'When new data appears' trigger that stopped checking after repeated failed checks. Returns false when it was not paused. Requires canManageReleases."
+  resumePollTrigger(processId: Long!, nodeName: String!): Boolean
+  "Replace a workflow's Schedule → query → If-Else chain (see workflowSuggestions; queryNode names the query) with a 'When new data appears' trigger that takes the query node's name and delivers the new rows as one batch, so references to that node's result keep working. cursorColumn is the column that only grows (an id or updated_at); null or empty means a run whenever the result changes. intervalSeconds is one of the trigger's interval choices. Writes a DRAFT, a new draft row when workflowId is a release; never releases. Same permission as saveWorkflow."
+  convertToPollingTrigger(workflowId: Long!, queryNode: String!, cursorColumn: String, intervalSeconds: Int!): WorkflowDataGql
   "Make an endpoint callable WITHOUT a login at POST /api/public/endpoints/<token> (for static sites), rotate that token, set the browser origins allowed to call it, or revoke it. Off by default. Anyone holding the token can call the endpoint, so return only what a stranger may see. Requires canManageReleases and canBuildWorkflows. Returns the resulting state, or null when the endpoint is not public."
   setEndpointPublicAccess(processPublicId: String!, "true = make the endpoint public (mints a token if it has none; an already-public endpoint keeps its token). false = revoke: the URL stops working immediately. Cannot be combined with rotate, allowedOrigins or allowAnyOrigin." enabled: Boolean, "true = replace the token; the previous URL stops working immediately. Only on an endpoint that is already public, unless enabled: true is sent too (a rotation never makes an endpoint public)." rotate: Boolean, "REPLACES the origins (exact scheme://host[:port], e.g. https://example.com) whose browser pages may call the endpoint. A request carrying any other Origin header is refused with 403 before the workflow runs; requests without an Origin (servers, curl) are allowed. [] = no browser page may call (the default when public access is first enabled). At most 20. Cannot be combined with allowAnyOrigin: true." allowedOrigins: [String!], "true = ANY website may call the endpoint from a visitor's browser (any Origin, including 'null'), so any page can make a visitor's browser trigger it. false = only allowedOrigins (none if it is omitted). Omitted = unchanged." allowAnyOrigin: Boolean): EndpointPublicAccessGql
   "Generate (or regenerate) an API key for a webhook; returns the plaintext key once"
@@ -3127,6 +3213,14 @@ type ProcessQueries {
   endpointPublicAccess(processPublicId: String!): EndpointPublicAccessGql
   "The vendor-side state of each Web Monitor trigger of a process's current release: pending, active, paused or error (with the reason). Empty when the process has none."
   webMonitorStatuses(processId: Long!): [WebMonitorStatus!]
+  "The state of each 'When new data appears' trigger of a process's current release: when it last checked and what it found, its next check, the interval actually used, and why it is slowed or paused. Empty when the process has none."
+  pollTriggerStatuses(processId: Long!): [PollTriggerStatus!]
+  "The interval choices of a 'When new data appears' trigger for this process's organization: each one's run cost over 30 days (0 at 5 minutes or slower, otherwise 1 run per 50 checks) and whether the organization's plan allows it."
+  pollIntervalOptions(processId: Long!): [PollIntervalOption!]
+  "Changes the builder suggests for a workflow. Today one kind, 'polling_trigger': a Schedule trigger whose only step is a SQL query followed by an If-Else that stops when the query found nothing. Such a chain starts a run on every tick; convertToPollingTrigger replaces it with a 'When new data appears' trigger that checks the same query without starting a run. Empty when there is nothing to suggest. Same access as getWorkflow."
+  workflowSuggestions(workflowId: Long!): [WorkflowSuggestion!]
+  "What a custom schedule (a 5-field cron, read in the given IANA timezone, UTC when null) of a 'When new data appears' trigger costs for this process's organization: whether it is valid, its shortest gap between checks, its run cost over 30 days and whether the plan allows it."
+  pollScheduleCost(processId: Long!, scheduleExpression: String!, scheduleTimezone: String): PollScheduleCost
   "The first 64 KB of a text, CSV or JSON file named by a file reference, for the file viewer. Takes the reference's `publicId` and `source`. The same access as workflowFileDownloadUrl: the file's source decides (its run, agent run, task, form, conversation or MCP session). Fails for a file that is not text."
   workflowFilePreview(publicId: String!, source: String): WorkflowFilePreview
 }
@@ -3586,6 +3680,17 @@ type TagAssignment {
   entityId: Long!
 }
 
+type TaskAppSession {
+  session: String
+  origin: String
+  src: String
+  expiresInSeconds: Int
+  refusal: String
+  appName: String
+  appPublicId: String
+  canFix: Boolean!
+}
+
 "A live task change: the created/updated/deleted task plus whether it matches the subscription's filters"
 type TaskEventGql {
   kind: String!
@@ -3619,8 +3724,11 @@ type TaskMutations {
   taskPageTicket(taskId: Long!, revisionId: String!): String
   "Preview unsaved task-page HTML: a single-use, 60-second link that renders the given HTML in the same sandbox as a saved page. Nothing is stored."
   taskPageDraftTicket(taskId: Long!, html: String!): String
-  "Call an endpoint as the signed-in person, on behalf of a task page that is granted it. pageId is the HTML page's revisionId; body is JSON text. The grant comes from the task, never from the page. Used by the Honeybase app's page bridge; API keys are refused."
-  callTaskPageEndpoint(taskId: Long!, pageId: String!, endpointId: String!, body: String, confirmed: Boolean): TaskPageEndpointResult
+  "Open a task's App page as the signed-in person: a short-lived session whose origin the page is framed at (renew it with renewTaskAppPage while open), or a refusal code saying why the app cannot be shown. API keys are refused."
+  openTaskAppPage(taskId: Long!, "The App page's pageId, from the task's embeddedPages" pageId: String!): TaskAppSession
+  "Keep an open App page's session alive. Returns refusal 'expired' when it is gone."
+  renewTaskAppPage("The session a previous openTaskAppPage returned" session: String!): TaskAppSession
+  callTaskPageEndpoint(taskId: Long!, pageId: String!, endpointId: String!, body: String, confirmed: Boolean, query: String): TaskPageEndpointResult
   "Create a new task"
   createTask(task: WorkflowTaskInput!): WorkflowTask
   "Create a new task with user or team-based assignment. Provide userId for direct assignment or teamId for random team member assignment."
@@ -3667,6 +3775,25 @@ type TaskMutations {
   batchAppendTaskNotes(taskIds: [Long!]!, text: String!): [WorkflowTask!]
   "Delete many tasks at once. Returns the number deleted."
   batchDeleteTasks(taskIds: [Long!]!): Int
+}
+
+type TaskPageApp {
+  appId: String!
+  path: String
+  params: [TaskPageAppParam!]
+  name: String
+}
+
+type TaskPageAppChoice {
+  publicId: String!
+  name: String!
+  embedMode: String!
+  refusal: String
+}
+
+type TaskPageAppParam {
+  key: String!
+  value: String!
 }
 
 type TaskPageEndpointGrant {
@@ -4118,6 +4245,16 @@ type WorkflowProcess {
   kind: String!
   settings: ProcessSettings!
   endpointContract: String
+}
+
+type WorkflowSuggestion {
+  kind: String!
+  scheduleNode: String!
+  queryNode: String!
+  ifElseNode: String!
+  scheduleRunsPerMonth: Long
+  suggestedIntervalSeconds: Int!
+  notes: [String!]!
 }
 
 type WorkflowTask {
