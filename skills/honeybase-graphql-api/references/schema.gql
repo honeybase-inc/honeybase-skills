@@ -318,6 +318,7 @@ input ResearchProviderOptionInput {
   allowedTiers: [String!]!
   defaultTier: String
   maxCostUsd: Float
+  maxCostHoneydrops: Float
 }
 
 input RunNodeGqlInput {
@@ -718,6 +719,8 @@ type AgentRun {
   costEstimated: Boolean!
   researchWaiting: Boolean!
   codeWaiting: Boolean!
+  ownKeyCostUsd: Float!
+  honeydropsSpent: Float!
 }
 
 type AgentRunChildSummary {
@@ -836,6 +839,7 @@ type AgentSettings {
   toolRefs: [AgentToolRef!]!
   maxTurns: Int!
   maxRunUsd: Float
+  maxRunHoneydrops: Float
   temperature: Float
   structuredOutputSchema: String
   taskModeCeiling: String!
@@ -906,6 +910,8 @@ type AgentUsage {
   orgMonthCost: Float!
   orgMonthlyBudgetUsd: Float
   perApp: [AgentUsageApp!]!
+  orgMonthOwnKeyCostUsd: Float!
+  orgMonthHoneydropsSpent: Float!
 }
 
 type AgentUsageAgent {
@@ -914,6 +920,8 @@ type AgentUsageAgent {
   monthTokens: Long!
   monthCost: Float!
   monthlyBudgetUsd: Float
+  monthOwnKeyCostUsd: Float!
+  monthHoneydropsSpent: Float!
 }
 
 type AgentUsageApp {
@@ -922,6 +930,8 @@ type AgentUsageApp {
   monthTokens: Long!
   monthCost: Float!
   monthRuns: Long!
+  monthOwnKeyCostUsd: Float!
+  monthHoneydropsSpent: Float!
 }
 
 type AgentUsageDay {
@@ -934,6 +944,8 @@ type AgentUsageDay {
   estimatedCost: Float!
   runCount: Long!
   appId: Long
+  ownKeyCostUsd: Float!
+  honeydropsSpent: Float!
 }
 
 type AgentVersion {
@@ -3376,6 +3388,7 @@ type ResearchProviderOption {
   allowedTiers: [String!]!
   defaultTier: String
   maxCostUsd: Float
+  maxCostHoneydrops: Float
 }
 
 type ResearchTier {
@@ -3392,6 +3405,12 @@ type ResearchTier {
   deadlineMinutes: Int!
   goodFor: String!
   maxDurationSeconds: Int
+  houseAvailable: Boolean!
+  ceilingHoneydrops: Float
+  honeydrops: Float
+  defaultHoneydrops: Float
+  minHoneydrops: Float
+  maxHoneydrops: Float
 }
 
 type Role {
