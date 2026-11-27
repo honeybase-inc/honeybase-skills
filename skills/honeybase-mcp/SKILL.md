@@ -1,7 +1,7 @@
 ---
 name: honeybase-mcp
 description: Drive Honeybase through its remote MCP server — connect an AI client over OAuth, then read and write tasks, processes, runs, teams, schedules, availability, agents, forms and the org database as MCP tools. Honeybase is a workflow-automation platform with no public documentation and AI models are not trained on it, so ALWAYS load this skill before connecting to or calling the Honeybase MCP server. Complements honeybase-graphql-api (raw GraphQL) and honeybase-forms (form authoring).
-version: 2026-11-23
+version: 2026-11-26
 ---
 
 # Honeybase MCP

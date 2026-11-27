@@ -149,6 +149,52 @@ the task updates live.
 To show data in the same page (a draft, an order), add a second, read-only
 endpoint and grant it with a `pin` naming the record.
 
+## Show an app on a task
+
+A page can also be one of the organization's released **apps**, opened with
+params, instead of a URL or HTML. It is the better choice when the review needs
+real UI (a form, a table, components) rather than a document. The app runs in
+its own sandbox at an origin of its own and talks to Honeybase through the same
+bridge as an HTML page.
+
+1. **Build the app** as usual: `create_app`, `write_app_file`, `build_app`, and
+   `set_app_endpoints` with every endpoint it calls (e.g. the "Submit review"
+   endpoint above). In the app's code, read the page's params with
+   `appParams()` and call endpoints with the generated functions or `call()`;
+   `useTask()` gives `{id, name, completed, formSubmitted}` live.
+2. **Release it to run inside tasks**: `release_app` with `embedMode`
+   `embed` (only on tasks) or `both`. An app released before apps could run
+   inside tasks is upgraded with `release_app {upgrade: true}`: it rebuilds the
+   LIVE release on the current template and leaves the draft alone.
+3. **Add the page** (`create_task` / `update_task` `pages`, or a Create/Update
+   Task node's `embeddedPages` row with `app`). The recipe, as the server tests
+   run it:
+
+```json
+{
+  "release": {"embedMode": "embed"},
+  "page": {
+    "name": "Draft review",
+    "app": {"appId": "APP_ID", "path": "/", "params": [{"key": "draftId", "value": "42"}]},
+    "grants": {"endpoints": [{"endpointId": "SUBMIT_REVIEW_ID"}]}
+  }
+}
+```
+
+`appId` is the app's public id; `path` is optional; `params` keys are letters,
+digits, `-` and `_` (not `hb_…`, `ticket`, `state` or `return`; at most 16, 2 KiB
+each). In a node, each param `value` may be a `{{ }}` template. Keep the page's
+`pageId` (returned on the task) when you resend the page list, so the page keeps
+its grants.
+
+An app can call only endpoints granted on the page **and** declared by the
+app; they run as the person viewing the task (`caller.kind` `task_page`,
+`caller.app` names the app). There is no public-network grant for apps. Inside
+a task the app has no agents and no `signIn()`, and its browser storage does
+not survive between sessions. If the app cannot be shown (runs on its own
+only, not released, needs the upgrade, paused), the task says why to the
+viewer.
+
 ## Runtime and security
 
 HTML runs on a separate honeybase.io host, in an opaque sandbox with scripts
