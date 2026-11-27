@@ -1395,6 +1395,7 @@ type BillingCreditsAdded {
 type BillingCreditsUsage {
   used: Long!
   available: Long!
+  projectedExhaustion: ZonedDateTime
 }
 
 type BillingMutations {
@@ -1426,7 +1427,7 @@ type BillingQueries {
   activity(limit: Int): [BillingActivity!]
   "What a return from hosted Checkout bought and whether it has been fulfilled (a pack once its grant is written, a plan once its first invoice is paid). Null for a session that is unknown or belongs to another organization. Requires canManageBilling."
   checkoutReturn(sessionId: String!): BillingCheckoutReturn
-  "This period's meters as numbers: runs used and the allowance (null allowance = unlimited), Honeydrops used and available (null when the organization has no Honeydrops), and the current and up to two previous billing periods. No prices or packs. Owners, Admins and members with a builder seat (Builder, or a custom role with canManageReleases); others, including API keys, are refused."
+  "This period's meters as numbers: runs used and the allowance (null allowance = unlimited), Honeydrops used and available (null when the organization has no Honeydrops), and the current and up to two previous billing periods. Each meter's `projectedExhaustion` is when it runs out at this period's pace (use so far divided by the time elapsed, at least one day, extrapolated), if that is before the period's end; null when it lasts to the reset, nothing was used yet, it is already used up, the meter is unlimited, or the plan is Internal. Only this field fills it (it is null on `organizationPlan.creditsUsage`). No prices or packs. Owners, Admins and members with a builder seat (Builder, or a custom role with canManageReleases); others, including API keys, are refused."
   usageMeters: BillingUsageMeters
   "Where runs or Honeydrops went in [from, to): grouped rows (largest first), a daily series and the total. When the window is whole billing periods and no filter is set, `total` is the meter for those periods (the same number the Billing card shows) and `notItemized` is the part no row explains yet. Numbers only. Same access as usageMeters."
   usage("runs or honeydrops." resource: String!, "Window start (inclusive). At most 400 days back; earlier is clamped." from: ZonedDateTime!, "Window end (exclusive). At most 100 days after from." to: ZonedDateTime!, "where (workflow, agent, Barry or MCP per person), source (Honeydrops source, or run trigger) or day." groupBy: String!, filters: BillingUsageFiltersInput): BillingUsageReport
@@ -1444,6 +1445,7 @@ type BillingRunMeter {
 type BillingRunsUsage {
   used: Long!
   allowance: Long
+  projectedExhaustion: ZonedDateTime
 }
 
 type BillingSeatMember {
