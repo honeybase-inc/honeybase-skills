@@ -82,6 +82,11 @@ enum ChatSubjectKind {
   Workflow
 }
 
+enum CodeSecretKind {
+  Integration
+  Secret
+}
+
 enum ConversationObjectKind {
   Agent
   App
@@ -169,6 +174,12 @@ input BillingUsageFiltersInput {
   agentIds: [Long!]
   "Keep usage whose workflow, agent or person name contains this text (case-insensitive)."
   search: String
+}
+
+input CodeSecretAttachmentInput {
+  kind: CodeSecretKind!
+  name: String
+  integrationId: Long
 }
 
 input EmbeddedPageInput {
@@ -1620,6 +1631,7 @@ type BuiltinSandboxOptions {
   allowedDomains: [String!]!
   packageRegistries: Boolean!
   timeoutSeconds: Int
+  secrets: [CodeSecretAttachment!]!
 }
 
 "A built-in agent tool: implemented server-side, no backing workflow. `enabled = false` means the server lacks the capability (web_search without an Exa API key)."
@@ -1674,6 +1686,14 @@ type CodeRunRequest {
   inputNames: [String!]!
   dataBytes: Long!
   timeoutSeconds: Int!
+  secretEnvNames: [String!]!
+  missingSecrets: [String!]!
+}
+
+type CodeSecretAttachment {
+  kind: CodeSecretKind!
+  name: String
+  integrationId: Long
 }
 
 type ConnectableApp {
@@ -2903,6 +2923,8 @@ type OrganizationCodeDefaults {
   allowedDomains: [String!]!
   "Opens the public package registries (PyPI, Debian, npm) so pip, apt-get and npm work"
   packageRegistries: Boolean!
+  "Org secrets and integrations a Barry or MCP code run may read as environment variables (SECRET_<NAME>, INTEGRATION_<SLUG>_<FIELD>). Names and ids only, never a value; any entry makes a run ask first"
+  secrets: [CodeSecretAttachment!]!
   "Whether the caller may change it (Owner or Admin role)"
   canEdit: Boolean!
 }
@@ -2930,7 +2952,7 @@ type OrganizationMutations {
   "Set the organization's web defaults (all three entries; null = the Honeybase default). Requires Owner or Admin role. Each entry is checked: a provider the tool supports, and a connection of this organization, of the provider's type, enabled and with a key. Existing agents keep their saved tool settings."
   setWebDefaults(search: WebToolDefaultInput, fetch: WebToolDefaultInput, interact: WebToolDefaultInput, "Deep research for Barry and MCP. Omitted or null: keep what is stored. An empty providers list clears it (every enabled research connection is used)." webResearch: ResearchOptionsInput): OrganizationWebDefaults
   "Set the organization's run_code setting. Requires Owner or Admin role. Domains are checked like a Run In Environment node's (a host or *.host, at least one at Domains). Existing agents keep their own run_code setting."
-  setCodeDefaults(network: NetworkLevel!, allowedDomains: [String!]!, packageRegistries: Boolean!): OrganizationCodeDefaults
+  setCodeDefaults(network: NetworkLevel!, allowedDomains: [String!]!, packageRegistries: Boolean!, "Secrets and integrations a code run may read. Omitted keeps the stored list; an empty list removes them all. Adding one needs canListSecrets or canManageSecrets (org secrets) or canManageIntegrations (integrations)" secrets: [CodeSecretAttachmentInput!]): OrganizationCodeDefaults
   "Set the Honeydrops AI hosting policy. Requires Owner or Admin role; API keys cannot write it. Applies to later inference calls, including existing agents and workflows."
   setAiHostingPolicy(policy: AiHostingPolicy!): OrganizationAiHosting
 }
