@@ -3211,6 +3211,10 @@ type ProcessMutations {
   confirmActionAuthorization(publicId: String!, "Also record a standing approval for THIS tool over MCP (\"Confirm and always allow\"): from then on the assistant's request for it runs immediately for this user. Personal, revocable from the Standing approvals list, never widens permissions." alwaysAllow: Boolean): ActionAuthorizationPreview
   "Decline an MCP action authorization request. Requires the session of the user who was asked; nothing happens and the assistant polling get_action_authorization sees status declined."
   declineActionAuthorization(publicId: String!): ActionAuthorizationPreview
+  "Save the saved browser login an MCP client proposed (a browser_login_proposal request), with the values the person reviewed. Creates the integration under the caller's own session exactly as createIntegration does (a person in the app with canManageIntegrations; never an API key), then answers the request with the new login. Requires the session of the user who was asked; single-use; rejected after the 30-minute window. Signing in is a separate step (startBrowserLogin)."
+  saveProposedBrowserLogin(publicId: String!, name: String!, "The saved login's settings (BrowserLoginConfig JSON)." config: String!): Integration
+  "Answer a browser_login_proposal request with a saved login that already exists, instead of saving a new one. Requires the session of the user who was asked and canManageIntegrations."
+  useLoginForProposal(publicId: String!, integrationId: Long!): ActionAuthorizationPreview
   "Cancel a run: a queued run is dropped before it executes; a running run stops at the next node boundary."
   cancelRun(runWorkflowId: Long!): Boolean
   "Cancel an in-memory (editor test) run by its run UUID; it stops at the next node boundary. These runs have no run history row, so they cannot be cancelled through cancelRun."
