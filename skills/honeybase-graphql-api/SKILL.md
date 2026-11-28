@@ -73,6 +73,28 @@ exhausted run allowances are skipped. Failed or interrupted starts are not retri
 
 Scheduled-run replacement keys are limited to 200 characters. Scheduled payloads are visible only to their creator or callers with run-history permission. MCP confirmation shows the replacement key and the existing pending run’s time and creator before replacing it.
 
+## Test runs (`testWorkflow`)
+
+`processes.testWorkflow(scope:, nodeNames:, ...)` runs part of a workflow as a
+recorded TEST run and returns the seeded run (poll `getProcessRun` with its
+`runWorkflow.runWorkflowId`). It really executes — emails are sent, rows written —
+but it is never counted in run metrics or the Runs meter, and Run History badges it
+"Test". Requires `canBuildWorkflows`; at most 120 test runs an hour per organization
+(`RATE_LIMITED` past that).
+- `scope`: `BACKWARD` (the `nodeNames` and everything they need), `STEP` (exactly one
+  node), `FORWARD` (one node, then onward like a real run, stopping after `until`).
+- Upstream data: `fromRunId` reuses a past run's results for every earlier step that
+  has not changed since (the trigger replays that run's real delivery; changed steps
+  re-run; a run that never started has no delivery and is refused). The past run is
+  never modified; the test links to it. Or `customInputs: [{nodeName, output}]` for
+  steps BEFORE the one that runs — `output` is a JSON-encoded step result; the run is
+  labelled as using made-up inputs. Neither = the triggers' sample payloads.
+- Version: `workflowPublicId` (a draft or release); omit it with `fromRunId` to run the
+  exact version that run used.
+- A step inside a loop: `STEP` with `fromRunId`, `loopName` (a loop around the step)
+  and `iterationIndex` (from 0, an element the run stored; omitted = the last one).
+  Loop-body steps cannot start or stop `FORWARD`.
+
 ## Errors
 
 GraphQL errors arrive as HTTP 200 with the failed field `null` plus:

@@ -436,6 +436,13 @@ input TaskViewSortInput {
   descending: Boolean!
 }
 
+input TestCustomInput {
+  "The step whose output this is (exact node name)"
+  nodeName: String!
+  "The step's output (its `result`) as a JSON value, e.g. {\"id\": 7}"
+  output: String!
+}
+
 input WebToolDefaultInput {
   provider: WebProvider
   integrationId: Long
@@ -3150,6 +3157,8 @@ type ProcessMutations {
   archiveWorkflow(workflowId: Long!): Boolean
   "Execute a single node in memory for testing without persisting results"
   runNodeInMemory(workflowData: WorkflowDataGqlInput!, nodeName: String!, previousRunNodes: [KVStringRunNodeGqlInput!], iterationLimit: Int, currentNodeOnly: Boolean, loopRunMode: String, loopSelectorName: String, loopSelectorIndex: Int, loopSelectorKey: String): RunWorkflowDataGql
+  "Run part of a workflow as a recorded TEST run: a step, a step to the end, or a set of nodes, from a past run's data (fromRunId), from custom inputs, or from the trigger samples. It really executes (emails are sent, rows written); it is never counted in run metrics or the Runs meter, and appears in Run History as a test. Requires canBuildWorkflows; at most 120 test runs an hour per organization"
+  testWorkflow("What runs: BACKWARD (the nodes in nodeNames and everything they need), STEP (exactly one node; earlier steps are reused from the run or the custom inputs when given, else they run), FORWARD (exactly one node, then onward like a real run, stopping after `until`)" scope: String!, "The node(s) to run: BACKWARD's targets, or STEP's / FORWARD's one start node" nodeNames: [String!]!, "FORWARD only: steps after which the run does not continue. Omit to run to the end" until: [String!], "Reuse this run's results for every earlier step that has not changed since (its trigger always replays the real delivery, so a run that never started cannot be retried). The run is never modified; the test run links to it" fromRunId: Long, "The workflow version to run (a draft or a release). Omit with fromRunId to run the exact version that run used" workflowPublicId: String, "With fromRunId, for a step inside a loop: the loop around it whose element to replay" loopName: String, "With loopName: the element's index, from 0, one the run stored. Omitted = the last element" iterationIndex: Int, "Outputs to use for steps BEFORE the one(s) that run, instead of running them. Not with fromRunId. The run is labelled as using made-up inputs" customInputs: [TestCustomInput!], "Caps the iterations of any loop that runs" iterationLimit: Int): RunWorkflowDataGql
   "Validate JavaScript packages for availability and version"
   validateJsPackages(packages: [JsPackageInput!]!): [JsPackageValidationResult!]
   "Update the JavaScript packages on a process (shared across all its workflow versions). Allowed even when releases are immutable."
@@ -3490,6 +3499,8 @@ type RunSummary {
   isTest: Boolean!
   testOrigin: String
   skipReason: String
+  retryOfRunWorkflowId: Long
+  testInputs: String
 }
 
 type RunWorkflow {
